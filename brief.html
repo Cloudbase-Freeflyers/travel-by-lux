@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Creative Brief | Travel by Luxe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Montserrat:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy: #21313B;
+      --teal: #2FA3A3;
+      --paper: #FDFBF9;
+      --muted: #6F757E;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: var(--paper);
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 15px;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; }
+    .doc-head {
+      border-bottom: 2px solid rgba(47, 163, 163, 0.25);
+      padding-bottom: 1.75rem;
+      margin-bottom: 2.5rem;
+    }
+    .doc-head h1 {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(1.45rem, 4vw, 1.95rem);
+      color: var(--navy);
+      letter-spacing: 0.04em;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+    .doc-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 0.65rem;
+      align-items: center;
+    }
+    .doc-actions button {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0.5rem 0.95rem;
+      border-radius: 999px;
+      border: 1px solid rgba(47, 163, 163, 0.45);
+      background: #fff;
+      color: var(--navy);
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+    .doc-actions button:hover {
+      background: rgba(47, 163, 163, 0.12);
+      border-color: var(--teal);
+      color: #1a5a5a;
+    }
+    .doc-actions button:focus-visible {
+      outline: 2px solid var(--teal);
+      outline-offset: 2px;
+    }
+    .doc-actions button:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+    .doc-meta {
+      font-size: 0.85rem;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+    }
+    .doc-meta strong { color: var(--navy); font-weight: 600; }
+    .doc-meta code {
+      background: rgba(47, 163, 163, 0.12);
+      color: #1f7a7a;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.88em;
+    }
+    section.brief-block { margin-bottom: 2.75rem; }
+    .brief-block h2 {
+      font-family: 'Cinzel', serif;
+      font-size: 1rem;
+      color: var(--teal);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid rgba(33, 49, 59, 0.12);
+    }
+    .label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--navy);
+      margin: 1.25rem 0 0.5rem;
+      font-weight: 600;
+    }
+    .label:first-of-type { margin-top: 0; }
+    .brief-block p, .brief-block ul { color: var(--muted); }
+    .brief-block ul { margin: 0.35rem 0 0 1.15rem; }
+    .brief-block li { margin-bottom: 0.35rem; }
+    .visual-box {
+      background: #fff;
+      border: 1px solid rgba(33, 49, 59, 0.1);
+      border-left: 4px solid var(--teal);
+      padding: 1rem 1.15rem;
+      margin-top: 0.75rem;
+      font-size: 0.92rem;
+      box-shadow: 0 8px 28px rgba(12, 18, 24, 0.06);
+    }
+    @media print {
+      body { background: #fff; padding: 1rem; }
+      .visual-box { box-shadow: none; }
+      .doc-actions { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="doc-head">
+      <h1>Creative brief</h1>
+      <div class="doc-actions" aria-label="Download brief">
+        <button type="button" id="brief-download-pdf">Download PDF</button>
+        <button type="button" id="brief-download-word">Download Word</button>
+      </div>
+    </header>
+
+    <section class="brief-block" id="nav">
+      <h2>1. Fixed navigation</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Wordmark:</strong> Travel by Luxe</li>
+        <li><strong>Tagline:</strong> Italy · Private · Signal, not noise</li>
+        <li><strong>Primary CTA:</strong> Get my offer → anchors to <code>#architect</code></li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Fixed top bar, frosted white (<code>rgba(255,255,255,0.94)</code>) with blur; Italiana-style wordmark feel; teal accent on tagline and pill CTA with gradient (<code>#2FA3A3</code> family). Shadow strengthens on scroll (<code>.nav.scrolled</code>).
+      </div>
+    </section>
+
+    <section class="brief-block" id="hero">
+      <h2>2. Hero + Instagram feed column</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Kicker:</strong> Beyond templates · Built for how travel will feel in 2030</li>
+        <li><strong>H1:</strong> Italy, composed for you—not the crowd.</li>
+        <li><strong>Subtitle:</strong> Private Vatican after-hours, closed-door ateliers, chef’s tables; curated <strong>4★ and 5★</strong> hotels matched to each leg; one senior designer; outline typically within <strong>48 hours on working days</strong>—complimentary, no obligation.</li>
+        <li><strong>Three callouts (with icons):</strong> (1) Access tourists can’t buy—private Vatican, closed-door ateliers; (2) Scholar-led—historians &amp; art experts; (3) Stays &amp; days in one design—4★ &amp; 5★ woven with route.</li>
+        <li><strong>Urgency line:</strong> Limited 2026 spots · Outline typically within 48h (working days)</li>
+        <li><strong>CTA:</strong> Get my custom offer → <code>#architect</code></li>
+        <li><strong>Right column (<code>hero-feed</code>):</strong> @travelbyluxe branding, optional follower count via <code>data-ig-followers</code>, trust chips (TripAdvisor Travelers’ Choice, Licensed operator, Bespoke private Italy), carousel of Italy imagery (links to Instagram), prev/next, dots, “Follow on Instagram” gradient button.</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Light mesh hero background (<code>--gradient-mesh-hero</code>: warm paper, teal and peach radial accents). Two-column grid on desktop (copy left, card right); stacks on mobile. Hero copy uses large display title; teal CTA pill. Instagram module: white card, rounded XL, soft shadow, 4:5 slides, muted Instagram-style follow gradient—not neon.
+      </div>
+    </section>
+
+    <section class="brief-block" id="tripadvisor">
+      <h2>3. TripAdvisor strip</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Label:</strong> Tripadvisor Travelers’ Choice Awards</li>
+        <li><strong>Badges:</strong> Stylized owl icons with years 2025, 2024, 2023</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Horizontal band evoking TripAdvisor-adjacent greens and gold (CSS variables <code>--ta-green</code>, <code>--ta-gold</code>); compact badge row—social proof between hero and long-form offer.
+      </div>
+    </section>
+
+    <section class="brief-block" id="ultimate-offer">
+      <h2>4. The Italy Access Blueprint (<code>#ultimate-offer</code>)</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Badge:</strong> The Italy Access Blueprint</li>
+        <li><strong>H2:</strong> Private Italy, rare access, and hand-picked stays—composed for you, not assembled from tabs.</li>
+        <li><strong>Lead:</strong> Dream outcome paragraph (touchdown with hard-to-book moments reserved; 4★/5★ curated to pace; one senior designer).</li>
+        <li><strong>Compare:</strong> “The old game” vs “The Luxe game” (tabs/no accountability vs one team, blank-page itinerary, hotels as same composition).</li>
+        <li><strong>Aside:</strong> Ground-truth planning—licensed operators, vetted guides, written outline ~48h, no deposit until ready; four pillar bullets; CTA “Start your trip brief” → <code>#architect</code>.</li>
+        <li><strong>Stack card:</strong> “What you get when you raise your hand” — rows: senior designer only; custom from zero (5-day minimum); accommodation in same brief; access layer; scholar-led; written proposal complimentary. Bonuses list; risk-reversal guarantee block; scarcity line (2026 capacity); CTA “Claim my custom outline” → <code>#architect</code>.</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Spacious editorial section on soft/off-white panels, strong heading hierarchy (<code>--text-heading</code> navy-teal), compare boxes side-by-side (old vs new). Aside + stacked deliverable card; checkmark rows; guarantee in distinct callout. Pill CTAs match global teal gradient.
+      </div>
+    </section>
+
+    <section class="brief-block" id="why-us">
+      <h2>5. Why Travel by Luxe (four pillars)</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>H2:</strong> Why Travel by Luxe is the ultimate choice</li>
+        <li><strong>01</strong> Access you can’t book yourself · <strong>02</strong> Scholars, not guides · <strong>03</strong> Stays &amp; days, one thread (4★/5★) · <strong>04</strong> Truly bespoke—no templates</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Four-card grid with large numerals (01–04), card surfaces and consistent padding; typographic hierarchy—title + short paragraph per card.
+      </div>
+    </section>
+
+    <section class="brief-block" id="trust">
+      <h2>6. Trust badges + proof row</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Icon row:</strong> Officially Licensed Guides, Verified Operator, Highly Rated, Vetted &amp; Insured</li>
+        <li><strong>Second row:</strong> Private Vatican After-Hours / Scholar-Led Guides / 4★ &amp; 5★ hotels / One Point of Contact — each with short subline</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Centered badge strip with stroke icons; below, a four-column proof row (responsive stack). Muted, institutional trust—no heavy color blocks.
+      </div>
+    </section>
+
+    <section class="brief-block" id="lifestyle">
+      <h2>7. Lifestyle image marquee</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li>Horizontally scrolling strip of Italy destination photography (Rome, Amalfi, Venice, Florence, Como, Tuscany, vineyard, coast); duplicates for seamless loop.</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Full-bleed horizontal track, auto-scroll animation—emotional “panorama” of Italy between trust and interactive mix section; no overlay copy.
+      </div>
+    </section>
+
+    <section class="brief-block" id="mix-match">
+      <h2>8. Mix &amp; match your ultimate Italy (<code>#inspiration</code>)</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>H2:</strong> Mix &amp; match your ultimate Italy</li>
+        <li><strong>Sub:</strong> Drag cards into your mix—or <strong>tap</strong> to add on mobile.</li>
+        <li><strong>Desc:</strong> Pair experiences with stay level (4★/5★); one proposal; send mix to inquiry before designer call.</li>
+        <li><strong>Panels:</strong> “Experiences &amp; stay” pool (<code>#mix-pool</code>, JS-populated); “Your custom mix” drop zone with placeholder, chips, hint; “Take this mix to my inquiry” (enables when mix non-empty); optional Clear.</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Two-panel layout; draggable/tappable chips; drop zone with dashed affordance; secondary button style for clear. Bridges inspiration to the architect form via shared state (tags appear in form when sent).
+      </div>
+    </section>
+
+    <section class="brief-block" id="video-ask">
+      <h2>9. Video message (<code>#video-ask</code>)</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Embed:</strong> YouTube nocookie iframe (welcome video)</li>
+        <li><strong>Badge:</strong> Video message</li>
+        <li><strong>H2:</strong> Press play—then tell us where Italy is taking you.</li>
+        <li><strong>Lead:</strong> Short welcome, then details below; bespoke outline, ~48h working days.</li>
+        <li><strong>CTA:</strong> Get in touch &amp; share my trip idea → <code>#architect</code></li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Two-column: rounded video frame + copy column; video badge with icon; CTA as text link/button consistent with page. Grid collapses to single column on small screens.
+      </div>
+    </section>
+
+    <section class="brief-block" id="architect">
+      <h2>10. Architect your journey (<code>#architect</code>)</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>H2:</strong> Architect your journey</li>
+        <li><strong>Intro:</strong> “Pearl” in frame; corners Pace / Culture / Food / Access; designer reads mood; 4★/5★ hotels; free outline, ~48h working days.</li>
+        <li><strong>Mix hub:</strong> Diamond SVG with draggable knob; hidden ranges sync Pace, Culture, Food, Exclusive; readout shows labels (e.g. Light Walking, Deep History, …).</li>
+        <li><strong>Form value line:</strong> Free written outline, 48h, no obligation, exclusive access.</li>
+        <li><strong>Multi-step form:</strong> Step 1 — phone (with country prefix), full name, optional mix tags from mix-match. Step 2 — confirm line, email, intended start date. Step 3 — trip idea textarea, smart suggestion chips, submit “Get my custom offer”.</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Dark “ink” gradient panel (<code>--gradient-ink</code>) for contrast section: light page cuts to immersive form. Diamond/pearl UI is the hero control (not separate sliders). Progress dots; form fields light-on-dark; primary buttons teal gradient. Phone compound control; mix tags as removable chips when carried from section 8.
+      </div>
+    </section>
+
+    <section class="brief-block" id="footer">
+      <h2>11. Footer + sticky CTA</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Badges:</strong> Officially Licensed · Verified Operator</li>
+        <li><strong>Line:</strong> Travel by Luxe · Private Italy design · Europe &amp; beyond · 5-day minimum · The next era of bespoke travel</li>
+        <li><strong>Sticky CTA (bottom):</strong> Get my custom offer → <code>#architect</code></li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        Minimal footer band; sticky bar fixed to viewport bottom on scroll—persistent conversion path without blocking content (typical mobile-first pattern).
+      </div>
+    </section>
+
+    <section class="brief-block" id="global">
+      <h2>12. Global system (homepage <code>index.html</code>)</h2>
+      <p class="label">Content</p>
+      <ul>
+        <li><strong>Title:</strong> Travel by Luxe | Private Italy — Composed for you, not the crowd</li>
+        <li><strong>Meta description:</strong> Next-era private Italy; scholar-led access; zero template itineraries; hand-picked 4★ &amp; 5★; one designer thread; custom outline ~48h working days, complimentary, no obligation.</li>
+        <li><strong>Tone:</strong> Confident, specific, 2030-forward; emphasis on access, scholars, single thread, risk reversal, 5-day minimum where stated.</li>
+      </ul>
+      <p class="label">Visual</p>
+      <div class="visual-box">
+        <strong>Brand kit (inline <code>:root</code>):</strong> Paper background <code>#FDFBF9</code>, headings <code>#21313B</code>, body <code>#6F757E</code>, accent teal <code>#2FA3A3</code>, peach secondary <code>#FFBC7D</code>, ink for dark sections <code>#0c1218</code>. <strong>Type:</strong> Inter (UI/body), Italiana (logo/display). <strong>Radius:</strong> 12–28px, pill buttons. <strong>Motion:</strong> smooth scroll, <code>scroll-padding-top</code> for fixed nav. Focus rings in teal or Instagram-magenta for IG controls.
+      </div>
+    </section>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    (function () {
+      var pdfBtn = document.getElementById('brief-download-pdf');
+      var wordBtn = document.getElementById('brief-download-word');
+      var wrap = document.querySelector('.wrap');
+
+      function setBusy(btn, busy) {
+        btn.disabled = busy;
+        btn.setAttribute('aria-busy', busy ? 'true' : 'false');
+      }
+
+      pdfBtn.addEventListener('click', function () {
+        if (!window.html2pdf || !wrap) return;
+        setBusy(pdfBtn, true);
+        var opt = {
+          margin: [12, 12, 12, 12],
+          filename: 'travel-by-lux-creative-brief.pdf',
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            ignoreElements: function (el) {
+              return el.classList && el.classList.contains('doc-actions');
+            }
+          },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        };
+        window.html2pdf().set(opt).from(wrap).save().then(function () {
+          setBusy(pdfBtn, false);
+        }).catch(function () {
+          setBusy(pdfBtn, false);
+        });
+      });
+
+      wordBtn.addEventListener('click', function () {
+        if (!wrap) return;
+        var clone = wrap.cloneNode(true);
+        var actions = clone.querySelector('.doc-actions');
+        if (actions) actions.remove();
+        var styles = '';
+        var styleEls = document.querySelectorAll('style');
+        for (var i = 0; i < styleEls.length; i++) {
+          styles += styleEls[i].innerHTML + '\n';
+        }
+        var fontLink = document.querySelector('link[href*="fonts.googleapis.com"]');
+        var headExtra = '';
+        if (fontLink) {
+          headExtra = '<link rel="stylesheet" href="' + fontLink.href.replace(/"/g, '&quot;') + '">';
+        }
+        var html = '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Creative brief — Travel by Luxe</title>' +
+          headExtra +
+          '<style>' + styles + '</style></head><body>' + clone.innerHTML + '</body></html>';
+        var blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'travel-by-lux-creative-brief.doc';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+      });
+    })();
+  </script>
+</body>
+</html>
