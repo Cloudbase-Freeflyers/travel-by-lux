@@ -1,0 +1,3 @@
+# Netlify / Cloudflare Pages: map pretty URL to the static file
+/brief    /brief.html   200
+/brief/   /brief.html   200
