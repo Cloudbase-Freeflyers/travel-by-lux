@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Travel by Luxe | Italy 2026: Architect Your Journey</title>
+  <meta name="description" content="Bespoke multi-day private tours of Italy. Zero-friction travel, scholar-led experiences, and 14-day grand tours. No 1-day tours.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/animations.css">
+</head>
+<body class="page">
+
+  <!-- Hero Section -->
+  <header class="hero">
+    <div class="hero__bg" aria-hidden="true"></div>
+    <div class="hero__overlay" aria-hidden="true"></div>
+    <div class="hero__content">
+      <p class="hero__subtitle">Story-Filled Journeys | Zero-Friction Travel</p>
+      <h1 class="hero__title">The Italy Grand Tour</h1>
+      <p class="hero__tagline">Move beyond the surface. Use the Architect tool below to define the intensity of your multi-day private immersion—5-day minimums, 14-day grand tours.</p>
+    </div>
+  </header>
+
+  <!-- Trust Section: Weight Off Shoulders -->
+  <section class="trust" aria-label="Why Travel by Luxe">
+    <div class="trust__inner">
+      <div class="trust__item">
+        <div class="trust__label">Zero-Friction</div>
+        <div class="trust__value">Door-to-door concierge. We handle every detail.</div>
+      </div>
+      <div class="trust__item">
+        <div class="trust__label">No 1-Day Tours</div>
+        <div class="trust__value">5-day minimums. 14-day grand tours for the discerning.</div>
+      </div>
+      <div class="trust__item">
+        <div class="trust__label">Scholar-Led</div>
+        <div class="trust__value">Expert guides with deep cultural and historical insight.</div>
+      </div>
+      <div class="trust__item">
+        <div class="trust__label">Bespoke 2026</div>
+        <div class="trust__value">Every itinerary crafted exclusively for you.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Itinerary Architect -->
+  <section class="architect" aria-label="Itinerary Architect">
+    <div class="architect__wrapper">
+      <div class="tool-panel">
+        <h2 class="tool-panel__title">Architect Your Journey</h2>
+
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Physicality (Pace)</span>
+            <span class="slider-label-value" id="lbl-pace">Chauffeur Lead</span>
+          </div>
+          <div class="slider-track-wrap">
+            <input type="range" id="pace" min="1" max="5" value="1" aria-label="Physicality pace">
+          </div>
+        </div>
+
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Culture</span>
+            <span class="slider-label-value" id="lbl-culture">Iconic Highlights</span>
+          </div>
+          <div class="slider-track-wrap">
+            <input type="range" id="culture" min="1" max="5" value="1" aria-label="Cultural depth">
+          </div>
+        </div>
+
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Gastronomy</span>
+            <span class="slider-label-value" id="lbl-food">Authentic Trattoria</span>
+          </div>
+          <div class="slider-track-wrap">
+            <input type="range" id="food" min="1" max="5" value="1" aria-label="Gastronomy level">
+          </div>
+        </div>
+
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Exclusivity</span>
+            <span class="slider-label-value" id="lbl-exclusive">Private Luxury</span>
+          </div>
+          <div class="slider-track-wrap">
+            <input type="range" id="exclusive" min="1" max="5" value="1" aria-label="Exclusivity level">
+          </div>
+        </div>
+
+        <div class="lead-form lead-form--hidden" id="form-container">
+          <p class="lead-form__notice">Architect profile saved. Enter your details to receive your 14-day custom proposal.</p>
+          <input type="text" placeholder="Full Name" aria-label="Full name">
+          <input type="email" placeholder="Email Address" aria-label="Email address">
+          <button type="button" class="cta-btn">Request Custom Proposal</button>
+        </div>
+      </div>
+
+      <div class="preview-panel">
+        <article class="preview-card" id="preview-card">
+          <div class="preview-card__tags" id="preview-tags">
+            <span class="feature-tag">Multi-Day Immersion</span>
+            <span class="feature-tag">Private Driver-Guide</span>
+          </div>
+          <h2 class="preview-card__title" id="preview-title">Your Custom Itinerary</h2>
+          <p class="preview-card__desc" id="preview-desc">Adjust the sliders to view how we curate your specific Italian experience.</p>
+          <ul class="preview-card__features" id="preview-features">
+            <li>Executive Class Transport</li>
+            <li>Hand-picked 5-Star Stays</li>
+          </ul>
+        </article>
+        <p class="architect-note">Strictly No 1-Day Tours | 5-Day Minimum | 14-Day Grand Tours</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Itinerary Features — Reveal on Scroll -->
+  <section class="itinerary-features" aria-label="What's Included">
+    <div class="itinerary-features__inner">
+      <h2 class="itinerary-features__title">What Defines a Luxe Journey</h2>
+      <div class="itinerary-features__grid">
+        <div class="itinerary-feature-card">
+          <div class="itinerary-feature-card__icon">I</div>
+          <h3 class="itinerary-feature-card__title">Verified Excellence</h3>
+          <p class="itinerary-feature-card__desc">Every guide and partner vetted for the highest standards of service and expertise.</p>
+        </div>
+        <div class="itinerary-feature-card">
+          <div class="itinerary-feature-card__icon">II</div>
+          <h3 class="itinerary-feature-card__title">Scholar-Led Guides</h3>
+          <p class="itinerary-feature-card__desc">Historians, art experts, and local specialists who bring depth to every experience.</p>
+        </div>
+        <div class="itinerary-feature-card">
+          <div class="itinerary-feature-card__icon">III</div>
+          <h3 class="itinerary-feature-card__title">Executive Logistics</h3>
+          <p class="itinerary-feature-card__desc">Seamless transfers, priority access, and concierge coordination at every step.</p>
+        </div>
+        <div class="itinerary-feature-card">
+          <div class="itinerary-feature-card__icon">IV</div>
+          <h3 class="itinerary-feature-card__title">Bespoke 2026 Designs</h3>
+          <p class="itinerary-feature-card__desc">Each itinerary crafted from scratch—no templates, no compromises.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Trust Bar -->
+  <footer class="trust-bar">
+    <span>Verified Excellence</span>
+    <span>Scholar-Led Guides</span>
+    <span>Executive Logistics</span>
+    <span>Bespoke 2026 Designs</span>
+  </footer>
+
+  <script src="js/slider-logic.js"></script>
+  <script src="js/animations.js"></script>
+</body>
+</html>

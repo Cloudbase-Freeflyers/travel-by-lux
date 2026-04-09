@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travel by Luxe | Italy 2026: Architect Your Journey</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --gold: #c5a059;
+            --gold-hover: #e2be7a;
+            --dark-navy: #0a1128;
+            --deep-black: #050810;
+            --glass: rgba(255, 255, 255, 0.05);
+            --off-white: #f4f4f4;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--deep-black);
+            color: var(--off-white);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Hero Section */
+        header {
+            height: 60vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background: linear-gradient(rgba(10, 17, 40, 0.7), rgba(5, 8, 16, 1)), 
+                        url('https://images.unsplash.com/photo-1523906834658-6e24ef2386f9?auto=format&fit=crop&q=80&w=2000') no-repeat center center/cover;
+            padding: 20px;
+        }
+
+        h1 {
+            font-family: 'Cinzel', serif;
+            font-size: 3rem;
+            color: var(--gold);
+            letter-spacing: 4px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: 300;
+        }
+
+        /* Main Architect Tool */
+        .main-wrapper {
+            max-width: 1100px;
+            margin: -100px auto 100px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            padding: 0 20px;
+        }
+
+        .tool-panel {
+            background: var(--dark-navy);
+            padding: 40px;
+            border: 1px solid var(--gold);
+            border-radius: 4px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+        }
+
+        .preview-panel {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .slider-container { margin-bottom: 35px; }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-family: 'Cinzel', serif;
+            font-size: 0.85rem;
+            color: var(--gold);
+        }
+
+        input[type=range] {
+            width: 100%;
+            height: 4px;
+            background: rgba(197, 160, 89, 0.3);
+            appearance: none;
+            outline: none;
+            accent-color: var(--gold);
+        }
+
+        /* Dynamic Itinerary Content */
+        .itinerary-card {
+            background: var(--glass);
+            border-left: 3px solid var(--gold);
+            padding: 30px;
+            min-height: 400px;
+            transition: all 0.4s ease;
+        }
+
+        .itinerary-card h2 {
+            font-family: 'Cinzel', serif;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+        }
+
+        .feature-tag {
+            display: inline-block;
+            padding: 5px 12px;
+            border: 1px solid var(--gold);
+            font-size: 0.7rem;
+            margin-right: 10px;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+        }
+
+        /* Lead Form */
+        .lead-form {
+            margin-top: 30px;
+            display: none; /* Shown after interaction */
+        }
+
+        input[type=email], input[type=text] {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 15px;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            font-family: inherit;
+        }
+
+        .cta-btn {
+            background: var(--gold);
+            color: var(--dark-navy);
+            border: none;
+            padding: 18px 30px;
+            font-weight: 700;
+            text-transform: uppercase;
+            cursor: pointer;
+            width: 100%;
+            letter-spacing: 1px;
+            transition: 0.3s;
+        }
+
+        .cta-btn:hover { background: var(--gold-hover); }
+
+        /* Trust Signals */
+        .trust-bar {
+            display: flex;
+            justify-content: space-around;
+            padding: 40px;
+            opacity: 0.6;
+            filter: grayscale(1);
+        }
+
+        @media (max-width: 850px) {
+            .main-wrapper { grid-template-columns: 1fr; margin-top: 20px; }
+            h1 { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <p class="subtitle">Story-Filled Journeys | Zero-Friction Travel</p>
+    <h1>The Italy Grand Tour</h1>
+    <p style="max-width: 600px; margin-top: 20px;">Move beyond the surface. Use the Architect tool below to define the intensity of your multi-day private immersion.</p>
+</header>
+
+<div class="main-wrapper">
+    <div class="tool-panel">
+        <div class="slider-container">
+            <div class="slider-header"><span>Physicality (Pace)</span><span id="lbl-pace">Chauffeur Lead</span></div>
+            <input type="range" id="pace" min="1" max="5" value="1">
+        </div>
+
+        <div class="slider-container">
+            <div class="slider-header"><span>Cultural Depth</span><span id="lbl-culture">Iconic Highlights</span></div>
+            <input type="range" id="culture" min="1" max="5" value="1">
+        </div>
+
+        <div class="slider-container">
+            <div class="slider-header"><span>Gastronomy</span><span id="lbl-food">Authentic Trattoria</span></div>
+            <input type="range" id="food" min="1" max="5" value="1">
+        </div>
+
+        <div class="slider-container">
+            <div class="slider-header"><span>Exclusivity</span><span id="lbl-exclusive">Private Luxury</span></div>
+            <input type="range" id="exclusive" min="1" max="5" value="1">
+        </div>
+
+        <div class="lead-form" id="form-container">
+            <p style="font-size: 0.8rem; margin-bottom: 15px; color: var(--gold);">ARCHITECT PROFILE SAVED: Enter details to receive your 14-day custom proposal.</p>
+            <input type="text" placeholder="Full Name">
+            <input type="email" placeholder="Email Address">
+            <button class="cta-btn">Request Custom Proposal</button>
+        </div>
+    </div>
+
+    <div class="preview-panel">
+        <div class="itinerary-card" id="card">
+            <div id="tags-box">
+                <span class="feature-tag">Multi-Day Immersion</span>
+                <span class="feature-tag">Private Driver-Guide</span>
+            </div>
+            <h2 id="itinerary-title">Your Custom Itinerary</h2>
+            <p id="itinerary-desc">Adjust the sliders to view how we curate your specific Italian experience.</p>
+            <ul id="features-list" style="margin-top: 20px; list-style: none; font-size: 0.9rem;">
+                </ul>
+        </div>
+        
+        <p style="text-align: center; font-size: 0.7rem; margin-top: 20px; text-transform: uppercase; color: var(--gold);">Strictly No 1-Day Tours | 5-Day Minimum</p>
+    </div>
+</div>
+
+<div class="trust-bar">
+    <span>Verified Excellence</span>
+    <span>Scholar-Led Guides</span>
+    <span>Executive Logistics</span>
+    <span>Bespoke 2026 Designs</span>
+</div>
+
+<script>
+    const contentMap = {
+        pace: ["Chauffeur Lead", "Light Walking", "Active Exploration", "Urban Trekker", "Cobblestone Adventurer"],
+        culture: ["Iconic Highlights", "Museum Immersion", "Deep History", "Scholar-Led", "Closed-Door Archives"],
+        food: ["Authentic Trattoria", "Vineyard Dining", "Michelin Selection", "Artisan Workshops", "Chef's Private Table"],
+        exclusive: ["Private Luxury", "Elite Access", "After-Hours Access", "Royal Standard", "Presidential Concierge"]
+    };
+
+    const sliders = document.querySelectorAll('input[type=range]');
+    
+    function updateUI() {
+        const p = document.getElementById('pace').value;
+        const c = document.getElementById('culture').value;
+        const f = document.getElementById('food').value;
+        const e = document.getElementById('exclusive').value;
+
+        // Update Labels
+        document.getElementById('lbl-pace').innerText = contentMap.pace[p-1];
+        document.getElementById('lbl-culture').innerText = contentMap.culture[c-1];
+        document.getElementById('lbl-food').innerText = contentMap.food[f-1];
+        document.getElementById('lbl-exclusive').innerText = contentMap.exclusive[e-1];
+
+        // Update Text
+        let title = "The Balanced Immersion";
+        let desc = "A 14-day journey designed to flow seamlessly between Rome, Florence, and Venice.";
+        let listItems = ["Executive Class Transport", "Hand-picked 5-Star Stays"];
+
+        if(c >= 4) {
+            title = "The Scholar's Grand Tour";
+            desc = "A deep-dive into the hidden history of Italy, featuring private access to Vatican archives and Florentine ateliers.";
+            listItems.push("Scholar-Led Museum Deep-Dives", "Behind-the-scenes Artisan visits");
+        }
+        
+        if(f >= 4) {
+            title = "The Epicurean Legend";
+            desc = "A journey for the palate. Private truffle hunting in Umbria and sunset dinners in Chianti vineyards.";
+            listItems.push("Private Estate Wine Tastings", "Artisan Pasta Masterclass");
+        }
+
+        if(p == 1) {
+            listItems.push("Strictly Door-to-Door Chauffeur Service");
+        }
+
+        document.getElementById('itinerary-title').innerText = title;
+        document.getElementById('itinerary-desc').innerText = desc;
+        
+        const listHTML = listItems.map(item => `<li><span style="color:var(--gold)">✓</span> ${item}</li>`).join('');
+        document.getElementById('features-list').innerHTML = listHTML;
+
+        // Show Form
+        document.getElementById('form-container').style.display = 'block';
+    }
+
+    // UTM LOGIC
+    window.onload = function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        // Match Search Ad Groups
+        if(urlParams.get('utm_content') === 'scholar') {
+            document.getElementById('culture').value = 5;
+            document.getElementById('exclusive').value = 4;
+        } else if (urlParams.get('utm_content') === 'epicurean') {
+            document.getElementById('food').value = 5;
+            document.getElementById('pace').value = 2;
+        } else if (urlParams.get('utm_content') === 'executive') {
+            document.getElementById('pace').value = 1;
+            document.getElementById('exclusive').value = 5;
+        }
+        
+        updateUI();
+    };
+
+    sliders.forEach(slider => slider.addEventListener('input', updateUI));
+
+</script>
+
+</body>
+</html>

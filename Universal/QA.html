@@ -1,0 +1,459 @@
+/* ===============================
+QA — FIX WEAK ASSETS ONLY (FINAL)
+=============================== */
+
+function agentDebugLog_(hypothesisId, location, message, data, runId) {
+  // #region agent log
+  const payload = {
+    runId: runId || "pre-fix",
+    hypothesisId: hypothesisId,
+    location: location,
+    message: message,
+    data: data || {},
+    timestamp: Date.now()
+  };
+  if (typeof fetch === "function") {
+    fetch("http://127.0.0.1:7242/ingest/dfeb0731-aa71-4ca7-a8f6-1f67580348bb", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
+  } else {
+    try {
+      UrlFetchApp.fetch("http://127.0.0.1:7242/ingest/dfeb0731-aa71-4ca7-a8f6-1f67580348bb", {
+        method: "post",
+        contentType: "application/json",
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true
+      });
+    } catch (_e) {}
+  }
+  // #endregion
+}
+
+function qaFixWeakAssets() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const adSheet = ss.getSheetByName("Ad Copy");
+  const keywordSheet = ss.getSheetByName("List Of Keywords");
+  const logSheet = getOrCreateQaLogSheet_();
+
+  const adData = adSheet.getDataRange().getValues();
+  const keywordData = keywordSheet.getDataRange().getValues();
+  const keywordHeaders = keywordData[0];
+  adSheet.getRange(1, 24).setValue("QA Score");
+
+  const lockShared = getSetting("LOCK_SHARED_HEADLINES", false);
+  const baseline = lockShared ? getBaselineHeadlines_() : null;
+
+  for (let i = 1; i < adData.length; i++) {
+
+    const rowNumber = i + 1;
+    const adGroup = (adData[i][1] || "").toString().trim();
+    if (!adGroup) continue;
+    agentDebugLog_("H1", "QA.html:qaFixWeakAssets:rowStart", "Scanning row for QA", {
+      row: rowNumber,
+      adGroup: adGroup,
+      lockShared: lockShared
+    }, "pre-fix");
+
+    const keywords = getKeywordsForAdGroup_(adGroup, keywordHeaders, keywordData);
+
+    let headlines = adData[i].slice(3, 18).map(v => (v == null ? "" : String(v)).trim());
+    let descriptions = adData[i].slice(18, 22).map(v => (v == null ? "" : String(v)).trim());
+    const rowScores = [];
+
+    // QA mode should repair existing assets only, not generate new ones for blank rows.
+    if (headlines.concat(descriptions).every(v => !v)) continue;
+
+    let allAssets = headlines.concat(descriptions);
+
+    /* ===============================
+    HEADLINES
+    =============================== */
+
+    for (let h = 0; h < headlines.length; h++) {
+      if (!headlines[h]) continue;
+      const score = scoreAsset_(headlines[h], "headline", h, adGroup);
+      rowScores.push(score);
+      agentDebugLog_("H2", "QA.html:qaFixWeakAssets:headlineScore", "Headline score evaluated", {
+        row: rowNumber,
+        adGroup: adGroup,
+        index: h + 1,
+        headline: headlines[h],
+        score: score
+      }, "pre-fix");
+
+      // 🔒 LOCK SHARED HEADLINES (H6–H15)
+      if (lockShared && h >= 5) {
+
+        if (headlines[h] !== baseline[h]) {
+
+          const oldVal = headlines[h];
+          const newVal = baseline[h];
+
+          adSheet.getRange(rowNumber, 4 + h)
+            .setValue(newVal)
+            .setBackground("#cfe2f3");
+
+          logQaChange_(
+            logSheet,
+            rowNumber,
+            adGroup,
+            columnToLetter_(4 + h),
+            "Headline " + (h+1),
+            oldVal,
+            newVal,
+            "Locked shared headline"
+          );
+
+          headlines[h] = newVal;
+          allAssets[h] = newVal;
+        } else {
+          adSheet.getRange(rowNumber, 4 + h).setBackground(null);
+        }
+
+        continue;
+      }
+
+      if (score >= 85) {
+        adSheet.getRange(rowNumber, 4 + h).setBackground(null);
+        continue; // good enough, skip
+      }
+
+      const issues = analyzeSingleAsset_(headlines[h], "headline", h, adGroup);
+      agentDebugLog_("H3", "QA.html:qaFixWeakAssets:headlineIssues", "Headline issues detected", {
+        row: rowNumber,
+        adGroup: adGroup,
+        index: h + 1,
+        issues: issues
+      }, "pre-fix");
+
+      const fixed = fixSingleAsset_(
+        headlines[h],
+        "headline",
+        adGroup,
+        keywords,
+        headlines,
+        descriptions
+      );
+
+      if (!fixed) continue;
+
+      // 🚫 Prevent duplicates (normalized)
+      const duplicate = allAssets.some(a => normalizeText_(a) === normalizeText_(fixed));
+      if (duplicate) continue;
+
+      adSheet.getRange(rowNumber, 4 + h)
+        .setValue(fixed)
+        .setBackground("#d9ead3");
+
+      logQaChange_(
+  logSheet,
+  rowNumber,
+  adGroup,
+  columnToLetter_(4 + h),
+  "Headline " + (h+1),
+  headlines[h],
+  fixed,
+  "Score: " + score + " | " + issues.join(" | ")
+);
+
+      headlines[h] = fixed;
+      allAssets[h] = fixed;
+
+      Utilities.sleep(600);
+    }
+
+    /* ===============================
+    DESCRIPTIONS
+    =============================== */
+
+    for (let d = 0; d < descriptions.length; d++) {
+      if (!descriptions[d]) continue;
+
+      const score = scoreAsset_(descriptions[d], "description", d, adGroup);
+      rowScores.push(score);
+      agentDebugLog_("H4", "QA.html:qaFixWeakAssets:descriptionScore", "Description score evaluated", {
+        row: rowNumber,
+        adGroup: adGroup,
+        index: d + 1,
+        description: descriptions[d],
+        score: score
+      }, "pre-fix");
+
+      // Apply color before fixing
+      if (score < 70) {
+        adSheet.getRange(rowNumber, 19 + d).setBackground("#f4cccc"); // red
+      } else if (score < 85) {
+        adSheet.getRange(rowNumber, 19 + d).setBackground("#fff2cc"); // yellow
+      } else {
+        adSheet.getRange(rowNumber, 19 + d).setBackground(null); // clear
+      }
+
+      // Skip strong assets
+      if (score >= 85) continue;
+
+      // Detect issues only for weak ones
+      const issues = analyzeSingleAsset_(descriptions[d], "description", d, adGroup);
+
+      const fixed = fixSingleAsset_(
+        descriptions[d],
+        "description",
+        adGroup,
+        keywords,
+        headlines,
+        descriptions
+      );
+
+      if (!fixed) continue;
+
+      const duplicate = allAssets.some(a => normalizeText_(a) === normalizeText_(fixed));
+      if (duplicate) continue;
+
+      adSheet.getRange(rowNumber, 19 + d)
+        .setValue(fixed)
+        .setBackground("#d9ead3");
+
+      logQaChange_(
+        logSheet,
+        rowNumber,
+        adGroup,
+        columnToLetter_(19 + d),
+        "Description " + (d+1),
+        descriptions[d],
+        fixed,
+        issues.join(" | ")
+      );
+
+      descriptions[d] = fixed;
+      allAssets[15 + d] = fixed;
+
+      Utilities.sleep(600);
+    }
+
+    if (rowScores.length) {
+      const avgScore = Math.round(rowScores.reduce((a, b) => a + b, 0) / rowScores.length);
+      const scoreCell = adSheet.getRange(rowNumber, 24);
+      scoreCell.setValue(avgScore);
+      if (avgScore < 70) {
+        scoreCell.setBackground("#f4cccc");
+      } else if (avgScore < 85) {
+        scoreCell.setBackground("#fff2cc");
+      } else {
+        scoreCell.setBackground("#d9ead3");
+      }
+    } else {
+      adSheet.getRange(rowNumber, 24).setValue("").setBackground(null);
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("QA complete — weak assets fixed");
+}
+
+function clearQaFormattingColors() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Ad Copy");
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("No rows to clear.");
+    return;
+  }
+  sheet.getRange(2, 4, lastRow - 1, 19).setBackground(null); // D:V
+  sheet.getRange(2, 24, lastRow - 1, 1).setBackground(null); // X
+  SpreadsheetApp.getUi().alert("QA formatting colors cleared.");
+}
+
+/* ===============================
+ISSUE DETECTION
+=============================== */
+
+function analyzeSingleAsset_(text, type, index, adGroup) {
+
+  if (!text) return ["empty"];
+
+  const issues = [];
+  const lower = text.toLowerCase();
+
+  const banned = [
+    "elevate","elevated","elevating",
+    "seamless",
+    "journey","journeys",
+    "architect",
+    "discover",
+    "bespoke"
+  ];
+
+  const generic = [
+    "luxury travel",
+    "travel experts",
+    "travel services",
+    "experiences",
+    "premium travel"
+  ];
+
+  const vague = [
+    "explore",
+    "discover",
+    "experience",
+    "travel better"
+  ];
+
+  // Length checks
+  if (type === "headline" && text.length > 30) issues.push("too long");
+  if (type === "description" && text.length > 90) issues.push("too long");
+  if (type === "description" && text.length < 60) issues.push("too short");
+
+  // AI wording
+  banned.forEach(w => {
+    if (lower.includes(w)) issues.push("AI wording");
+  });
+
+  // Generic
+  generic.forEach(w => {
+    if (lower.includes(w)) issues.push("generic/off-the-shelf");
+  });
+
+  // Vague
+  vague.forEach(w => {
+    if (lower.includes(w)) issues.push("too vague");
+  });
+
+  // Ad group specificity (first 3 headlines)
+  if (type === "headline" && index < 3) {
+    const words = adGroup.toLowerCase().split(" ");
+    const match = words.some(w => lower.includes(w));
+    if (!match) issues.push("not ad group specific");
+  }
+
+  // Weak structure
+  if (text.split(" ").length <= 2) {
+    issues.push("too vague");
+  }
+
+  return [...new Set(issues)];
+}
+
+/* ===============================
+FIX ASSET
+=============================== */
+
+function fixSingleAsset_(text, type, adGroup, keywords, headlines, descriptions) {
+
+  const useExample = getSetting("USE_EXAMPLE_STYLE", getSetting("USE_LIRAN_STYLE", false));
+  agentDebugLog_("H5", "QA.html:fixSingleAsset_:styleRef", "Style reference availability", {
+    adGroup: adGroup,
+    type: type,
+    useExample: useExample
+  }, "pre-fix");
+  const exampleReference = useExample ? getExampleStyleReference_() : "";
+
+  const prompt = `
+Rewrite this ${type} for a luxury travel ad.
+
+Original:
+${text}
+
+Ad group:
+${adGroup}
+
+${useExample ? `
+STYLE REFERENCE (VERY IMPORTANT):
+
+Match the tone, clarity, and level of specificity of these examples.
+
+${exampleReference}
+
+Do NOT copy directly. Use the same style and structure.
+` : ""}
+
+Rules:
+- Must clearly reflect private guided tours, custom itineraries, or exclusive access
+- No elevate, seamless, journey, architect, discover, bespoke
+- No generic phrases like luxury travel or travel services
+- Avoid vague wording
+- Keep tone human, clear, and specific
+- Do not duplicate existing lines
+- ${type === "headline" ? "Max 30 characters including spaces" : "60 to 90 characters including spaces"}
+
+Existing assets:
+${headlines.concat(descriptions).join(" | ")}
+
+Return ONLY the rewritten line.
+`;
+
+  try {
+    return callOpenAIText(prompt).trim();
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ===============================
+HELPERS
+=============================== */
+
+function normalizeText_(text) {
+  return (text || "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getBaselineHeadlines_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Ad Copy");
+  return sheet.getRange(2, 4, 1, 15).getValues()[0];
+}
+
+function getKeywordsForAdGroup_(adGroup, headers, data) {
+  const col = headers.findIndex(h => h === adGroup);
+  if (col === -1) return [];
+  return data.slice(1).map(r => r[col]).filter(Boolean);
+}
+
+function getExampleStyleReference_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const exampleSheet = ss.getSheetByName("Ad copy example");
+  if (!exampleSheet) {
+    agentDebugLog_("H5", "QA.html:getExampleStyleReference_", "Ad copy example tab missing", {
+      sheetName: "Ad copy example"
+    }, "pre-fix");
+    return "";
+  }
+  const values = exampleSheet.getDataRange().getDisplayValues();
+  const lines = [];
+  for (let r = 0; r < values.length; r++) {
+    for (let c = 0; c < values[r].length; c++) {
+      const cell = (values[r][c] || "").toString().trim();
+      if (cell) lines.push(cell);
+    }
+  }
+  const joined = lines.join("\n").slice(0, 4000);
+  agentDebugLog_("H5", "QA.html:getExampleStyleReference_", "Loaded example style text", {
+    sheetName: "Ad copy example",
+    totalNonEmptyCells: lines.length,
+    extractedLength: joined.length
+  }, "pre-fix");
+  return joined;
+}
+
+function getOrCreateQaLogSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("QA Log");
+
+  if (!sheet) {
+    sheet = ss.insertSheet("QA Log");
+    sheet.appendRow(["Time","Row","AdGroup","Column","Asset","Old","New","Reason"]);
+  }
+  return sheet;
+}
+
+function logQaChange_(sheet,row,group,col,asset,oldVal,newVal,reason){
+  sheet.appendRow([new Date(),row,group,col,asset,oldVal,newVal,reason]);
+}
+
+function columnToLetter_(column){
+  let temp="",letter="";
+  while(column>0){
+    temp=(column-1)%26;
+    letter=String.fromCharCode(temp+65)+letter;
+    column=(column-temp-1)/26;
+  }
+  return letter;
+}

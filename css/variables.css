@@ -1,0 +1,46 @@
+/* Travel by Luxe — Design Tokens */
+
+:root {
+  /* Primary Palette */
+  --luxe-navy: #0a1128;
+  --luxe-black: #050810;
+  --luxe-gold: #c5a059;
+  --luxe-gold-hover: #e2be7a;
+  --luxe-gold-muted: rgba(197, 160, 89, 0.4);
+  --luxe-gold-subtle: rgba(197, 160, 89, 0.15);
+
+  /* Glass & Surfaces */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(197, 160, 89, 0.25);
+  --glass-gold-border: 1px solid var(--luxe-gold);
+  --off-white: #f4f4f4;
+  --off-white-muted: rgba(244, 244, 244, 0.7);
+
+  /* Typography */
+  --font-serif: 'Cinzel', 'Playfair Display', Georgia, serif;
+  --font-sans: 'Montserrat', 'Inter', -apple-system, sans-serif;
+  --letter-spacing-wide: 0.08em;
+  --letter-spacing-body: 0.05em;
+  --line-height-body: 1.5;
+  --line-height-tight: 1.2;
+
+  /* Elevation — Premium Weight */
+  --shadow-deep: 0 20px 50px rgba(0, 0, 0, 0.8);
+  --shadow-panel: 0 25px 60px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 15px 40px rgba(0, 0, 0, 0.5);
+
+  /* Spacing — Generous for Grandeur */
+  --space-xs: 0.5rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2.5rem;
+  --space-xl: 4rem;
+  --space-2xl: 6rem;
+  --space-3xl: 8rem;
+
+  /* Layout */
+  --max-width-content: 1200px;
+  --max-width-narrow: 680px;
+  --border-radius: 4px;
+  --transition-smooth: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}

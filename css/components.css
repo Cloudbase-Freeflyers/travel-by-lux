@@ -1,0 +1,315 @@
+/* Components — Travel by Luxe */
+
+/* Tool Panel — Architect Controls */
+.tool-panel {
+  background: var(--luxe-navy);
+  padding: var(--space-xl);
+  border: var(--glass-gold-border);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-deep);
+}
+
+.tool-panel__title {
+  font-family: var(--font-serif);
+  font-size: 0.9rem;
+  letter-spacing: 0.2em;
+  color: var(--luxe-gold);
+  text-transform: uppercase;
+  margin-bottom: var(--space-lg);
+}
+
+/* Custom Range Sliders — Gold-Bordered Diamond/Circle Thumbs */
+.slider-container {
+  margin-bottom: var(--space-lg);
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+  font-family: var(--font-serif);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  color: var(--luxe-gold);
+}
+
+.slider-label-value {
+  font-size: 0.75rem;
+  color: var(--off-white-muted);
+}
+
+.slider-track-wrap {
+  position: relative;
+  padding: 12px 0;
+}
+
+.slider-track-wrap input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--luxe-gold-subtle);
+  border-radius: 2px;
+  outline: none;
+}
+
+/* Webkit (Chrome, Safari) */
+.slider-track-wrap input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--luxe-gold);
+  border-radius: 50%;
+  background: var(--luxe-navy);
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--luxe-black);
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.slider-track-wrap input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 12px var(--luxe-gold-muted);
+}
+
+/* Firefox */
+.slider-track-wrap input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--luxe-gold);
+  border-radius: 50%;
+  background: var(--luxe-navy);
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--luxe-black);
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.slider-track-wrap input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 12px var(--luxe-gold-muted);
+}
+
+/* Preview Card — Glassmorphism */
+.preview-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--luxe-gold);
+  padding: var(--space-xl);
+  min-height: 420px;
+  box-shadow: var(--shadow-card);
+  transition: all var(--transition-smooth);
+}
+
+.preview-card:hover {
+  border-color: var(--luxe-gold-muted);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.preview-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.feature-tag {
+  display: inline-block;
+  padding: 6px 14px;
+  border: 1px solid var(--luxe-gold);
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--luxe-gold);
+}
+
+.preview-card__title {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  color: var(--off-white);
+  margin-bottom: var(--space-md);
+  letter-spacing: 0.08em;
+}
+
+.preview-card__desc {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--off-white-muted);
+  margin-bottom: var(--space-lg);
+}
+
+.preview-card__features {
+  list-style: none;
+}
+
+.preview-card__features li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
+  font-size: 0.85rem;
+  color: var(--off-white-muted);
+}
+
+.preview-card__features li::before {
+  content: '✓';
+  color: var(--luxe-gold);
+  font-weight: 600;
+}
+
+/* Lead Form */
+.lead-form {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--luxe-gold-subtle);
+}
+
+.lead-form--hidden {
+  display: none;
+}
+
+.lead-form__notice {
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  color: var(--luxe-gold);
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+}
+
+.lead-form input[type="text"],
+.lead-form input[type="email"] {
+  width: 100%;
+  padding: 14px 16px;
+  margin-bottom: var(--space-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  color: var(--off-white);
+  font-family: inherit;
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  transition: border-color var(--transition-smooth);
+}
+
+.lead-form input::placeholder {
+  color: var(--off-white-muted);
+  opacity: 0.6;
+}
+
+.lead-form input:focus {
+  outline: none;
+  border-color: var(--luxe-gold-muted);
+}
+
+/* CTA Button — Shimmer Effect */
+.cta-btn {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  padding: 18px 30px;
+  background: var(--luxe-gold);
+  color: var(--luxe-navy);
+  border: none;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--transition-smooth), color var(--transition-smooth);
+}
+
+.cta-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  transition: left 0.6s ease;
+}
+
+.cta-btn:hover {
+  background: var(--luxe-gold-hover);
+}
+
+.cta-btn:hover::before {
+  left: 100%;
+}
+
+/* Architect Footer Note */
+.architect-note {
+  text-align: center;
+  font-size: 0.7rem;
+  margin-top: var(--space-lg);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--luxe-gold);
+}
+
+/* Itinerary Features List — Reveal on Scroll */
+.itinerary-features {
+  padding: var(--space-2xl) var(--space-md);
+}
+
+.itinerary-features__inner {
+  max-width: var(--max-width-content);
+  margin: 0 auto;
+}
+
+.itinerary-features__title {
+  text-align: center;
+  margin-bottom: var(--space-xl);
+  color: var(--luxe-gold);
+}
+
+.itinerary-features__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-lg);
+}
+
+.itinerary-feature-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--transition-smooth), opacity var(--transition-smooth);
+}
+
+.itinerary-feature-card.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.itinerary-feature-card:not(.revealed) {
+  opacity: 0;
+  transform: translateY(30px);
+}
+
+.itinerary-feature-card__icon {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  color: var(--luxe-gold);
+  margin-bottom: var(--space-sm);
+}
+
+.itinerary-feature-card__title {
+  font-family: var(--font-serif);
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--space-xs);
+}
+
+.itinerary-feature-card__desc {
+  font-size: 0.85rem;
+  color: var(--off-white-muted);
+  line-height: 1.5;
+}

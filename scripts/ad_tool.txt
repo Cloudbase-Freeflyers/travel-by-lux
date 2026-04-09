@@ -1,0 +1,2866 @@
+const AD_TOOL_ROW_LIMIT = 5;
+const DEFAULT_BATCH_DELAY_MS = 1200;
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_TEMPERATURE = 0.4;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BACKOFF_MS = 500;
+const DEFAULT_RETRY_TEMPERATURE = 0.2;
+const DEFAULT_SPECIFIC_HEADLINE_COUNT = 5;
+const DEFAULT_SPECIFIC_DESCRIPTION_COUNT = 2;
+const DEFAULT_CTA_MODE = "balanced";
+const DEFAULT_FIXED_ASSETS_SHEET = "Brand Fixed Assets";
+const DEFAULT_BANNED_WORDS = "elevate,elevated,elevating,seamless,journey,journeys,architect,legendary,discover,bespoke,reunion,packages";
+const DEFAULT_OFF_SHELF_WORDS = "packages,deals,travel packages,travel deals,reunion packages,luxury travel,travel experts,experiences";
+const DEFAULT_CTA_BRANDED_LIST = "Request a Custom Proposal\nSpeak With a Luxury Travel Designer\nPlan Your Private Journey";
+const DEFAULT_CTA_EXPERIENCE_LIST = "Start Your Private Guided Experience\nBuild Your Custom Itinerary\nUnlock Exclusive Access";
+const DEFAULT_ANGLE_MIN_HEADLINES = "awards:1";
+const DEFAULT_ANGLE_MIN_DESCRIPTIONS = "awards:1";
+const DEFAULT_EVENT_FEEDBACK_APPEND = "";
+const DEFAULT_ANGLE_LIBRARY_SHEET = "Brand Angles";
+const DEFAULT_SELECTED_HEADLINE_ANGLES = "";
+const DEFAULT_SELECTED_DESCRIPTION_ANGLES = "";
+const DEFAULT_ANGLE_ASSIGNMENTS_HEADLINES = "";
+const DEFAULT_ANGLE_ASSIGNMENTS_DESCRIPTIONS = "";
+const DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_ENABLED = "false";
+const DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT = "Rated 5 stars across Google";
+const DEFAULT_BRAND_QA_MODE = "audit_only";
+const DEFAULT_OPTION_BANK_SHEET = "Brand Option Bank";
+const DEFAULT_CAMPAIGN_PICKS_SHEET = "Campaign Option Picks";
+const DEFAULT_FALLBACK_ANGLES = [
+  { id: "social-proof", name: "Social Proof", type: "both", focus: "Ratings, reviews, and credibility", examples: ["Rated 5 stars across Google", "Trusted by discerning travelers"] },
+  { id: "memory-architect", name: "Memory Architect", type: "both", focus: "Unforgettable, deeply personal travel moments", examples: ["Journeys built around your milestones", "Trips designed to become lifelong memories"] },
+  { id: "anti-hassle", name: "Anti-Hassle", type: "both", focus: "Stress-free planning and seamless logistics", examples: ["We handle every detail from start to finish", "Private travel without the planning stress"] },
+  { id: "exclusive-access", name: "Exclusive Access", type: "both", focus: "Places and experiences not easily self-booked", examples: ["Access experiences most travelers never see", "Private access beyond standard bookings"] },
+  { id: "custom-itinerary", name: "Custom Itinerary", type: "both", focus: "Tailor-made itineraries built from scratch", examples: ["Every itinerary built from scratch for you", "Custom routes shaped around your style"] },
+  { id: "awards", name: "Awards & Recognition", type: "both", focus: "Credibility through recognition and reputation", examples: ["Award-winning luxury travel planning", "Recognized for private luxury journeys"] }
+];
+
+/* ===============================
+API KEY
+=============================== */
+
+function getApiKey() {
+  return PropertiesService
+    .getScriptProperties()
+    .getProperty("OPENAI_API_KEY");
+}
+
+/* ===============================
+SETTINGS
+=============================== */
+
+function getSetting(key, defaultValue) {
+  const val = PropertiesService.getScriptProperties().getProperty(key);
+  return val === null ? defaultValue : val === "true";
+}
+
+function setSetting(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, value);
+}
+
+function getTextSetting_(key, defaultValue) {
+  const val = PropertiesService.getScriptProperties().getProperty(key);
+  return val === null || val === "" ? defaultValue : String(val);
+}
+
+function getNumberSetting_(key, defaultValue, min, max) {
+  const raw = PropertiesService.getScriptProperties().getProperty(key);
+  let n = Number(raw);
+  if (!isFinite(n)) n = defaultValue;
+  if (typeof min === "number" && n < min) n = min;
+  if (typeof max === "number" && n > max) n = max;
+  return n;
+}
+
+function getEnumSetting_(key, defaultValue, allowed) {
+  const raw = String(getTextSetting_(key, defaultValue || "") || "").toLowerCase().trim();
+  return allowed.indexOf(raw) >= 0 ? raw : defaultValue;
+}
+
+function htmlEscape_(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function agentDebugLog_(hypothesisId, location, message, data, runId) {
+  const payload = {
+    runId: runId || "pre-fix",
+    hypothesisId: hypothesisId,
+    location: location,
+    message: message,
+    data: data || {},
+    timestamp: Date.now()
+  };
+  try {
+    UrlFetchApp.fetch("http://127.0.0.1:7242/ingest/dfeb0731-aa71-4ca7-a8f6-1f67580348bb", {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (_e) {}
+}
+
+/* ===============================
+MENU
+=============================== */
+
+function onOpen() {
+  const ui = getSpreadsheetUiSafe_();
+  if (!ui) return;
+  ui.createMenu('Travel by Luxe Tools')
+    .addItem('Open Tools Panel', 'showToolsPanel')
+    .addSeparator()
+    .addItem('Generate Ads', 'generateAds')
+    .addItem('Generate Ads (1 Row Test)', 'generateAdsOneRowTest')
+    .addItem('Fix Length Issues', 'fixAdLengthIssues')
+    .addSeparator()
+    .addItem('QA Fix Weak Assets', 'qaFixWeakAssets')
+    .addItem('Clear QA Formatting', 'clearQaFormattingColors')
+    .addItem('QA Standalone - Run Fix', 'menuQaStandaloneRunFix')
+    .addItem('QA Standalone - Brand Audit', 'menuQaStandaloneBrandAudit')
+    .addItem('QA Standalone - Brand Fix', 'menuQaStandaloneBrandFix')
+    .addItem('QA Standalone - Undo Last Run', 'menuQaStandaloneUndoLastRun')
+    .addItem('QA Standalone - Clear Colors', 'menuQaStandaloneClearColors')
+    .addItem('QA Length Audit - Over Limits', 'menuQaLengthAudit')
+    .addItem('QA Length Fix - Auto Shorten', 'menuQaLengthFixAllTooLong')
+    .addItem('QA Length Fix - Show Mode', 'menuQaLengthShowMode')
+    .addItem('Length Mode: Deterministic', 'menuQaLengthModeDeterministic')
+    .addItem('Length Mode: AI Fallback', 'menuQaLengthModeAiFallback')
+    .addItem('Length Mode: Compare Best', 'menuQaLengthModeCompareBest')
+    .addItem('Batch QA - Run Selected', 'qaBatchRunSelected')
+    .addItem('Batch QA - Configure', 'qaBatchConfigure')
+    .addItem('Option Bank - Generate 20/20', 'generateBrandOptionBank')
+    .addItem('Option Bank - Apply Picks', 'applyCampaignOptionPicks')
+    .addSeparator()
+    .addItem('Prompt & Brand Settings', 'showSettingsMenu')
+    .addItem('Prompt Extractor', 'showPromptExtractor')
+    .addItem('Brand Manifest Summary', 'showBrandManifestSummaryPopup')
+    .addItem('Show Current Settings', 'showCurrentSettings')
+    .addItem('Preset: Fast Batch', 'applyFastBatchPreset')
+    .addItem('Preset: Quality Batch', 'applyQualityBatchPreset')
+    .addItem('Reset Dynamic Settings', 'resetDynamicSettings')
+    .addToUi();
+}
+
+function onInstall() {
+  onOpen();
+}
+
+function runOptionalModuleFn_(fnName, moduleFileHint) {
+  const fn = this && this[fnName];
+  if (typeof fn === "function") {
+    return fn();
+  }
+  SpreadsheetApp.getUi().alert(
+    "Function not available: " + fnName + "\n" +
+    "Please make sure " + moduleFileHint + " is added and saved in this Apps Script project."
+  );
+}
+
+function menuQaStandaloneRunFix() {
+  return runOptionalModuleFn_("qaStandaloneFixAssets", "QA_standalone.gs");
+}
+
+function menuQaStandaloneBrandAudit() {
+  return runOptionalModuleFn_("qaStandaloneBrandComplianceAudit", "QA_standalone.gs");
+}
+
+function menuQaStandaloneBrandFix() {
+  return runOptionalModuleFn_("qaStandaloneBrandComplianceFix", "QA_standalone.gs");
+}
+
+function menuQaStandaloneUndoLastRun() {
+  return runOptionalModuleFn_("qaStandaloneUndoLastRun", "QA_standalone.gs");
+}
+
+function menuQaStandaloneClearColors() {
+  return runOptionalModuleFn_("qaStandaloneClearColors", "QA_standalone.gs");
+}
+
+function menuQaLengthAudit() {
+  return runOptionalModuleFn_("qaLengthAuditRun", "QA_length_audit.gs");
+}
+
+function menuQaLengthFixAllTooLong() {
+  return runOptionalModuleFn_("qaLengthFixAllTooLong", "QA_length_audit.gs");
+}
+
+function menuQaLengthShowMode() {
+  return runOptionalModuleFn_("qaLengthFixShowMode", "QA_length_audit.gs");
+}
+
+function menuQaLengthModeDeterministic() {
+  return runOptionalModuleFn_("qaLengthFixModeDeterministic", "QA_length_audit.gs");
+}
+
+function menuQaLengthModeAiFallback() {
+  return runOptionalModuleFn_("qaLengthFixModeAiFallback", "QA_length_audit.gs");
+}
+
+function menuQaLengthModeCompareBest() {
+  return runOptionalModuleFn_("qaLengthFixModeCompareBest", "QA_length_audit.gs");
+}
+
+function installMenuNow() {
+  const ui = getSpreadsheetUiSafe_();
+  if (!ui) {
+    throw new Error("Open the bound Google Sheet, then run installMenuNow.");
+  }
+  onOpen();
+}
+
+function getSpreadsheetUiSafe_() {
+  try {
+    return SpreadsheetApp.getUi();
+  } catch (_e) {
+    return null;
+  }
+}
+
+function qaBatchConfigure() {
+  const ui = SpreadsheetApp.getUi();
+  const current = getTextSetting_("QA_BATCH_STEPS", "qaStandaloneFixAssets,qaStandaloneBrandComplianceAuto,qaLengthAuditRun,qaLengthFixAllTooLong");
+  const resp = ui.prompt(
+    "Configure QA Batch",
+    "Enter comma-separated functions in run order.\nAllowed:\nqaStandaloneFixAssets, qaStandaloneBrandComplianceAuto, qaStandaloneBrandComplianceAudit, qaStandaloneBrandComplianceFix, qaLengthAuditRun, qaLengthFixAllTooLong, qaFixWeakAssets, generateBrandOptionBank, applyCampaignOptionPicks\n\nCurrent: " + current,
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  const next = (resp.getResponseText() || "").trim();
+  setSetting("QA_BATCH_STEPS", next || current);
+  ui.alert("QA batch steps saved.");
+}
+
+function qaBatchRunSelected() {
+  const ui = SpreadsheetApp.getUi();
+  const configured = getTextSetting_("QA_BATCH_STEPS", "qaStandaloneFixAssets,qaStandaloneBrandComplianceAuto,qaLengthAuditRun,qaLengthFixAllTooLong");
+  const steps = configured.split(",").map(s => s.trim()).filter(Boolean);
+  const brandQaMode = getEnumSetting_("BRAND_QA_MODE", DEFAULT_BRAND_QA_MODE, ["audit_only", "audit_and_fix"]);
+  const allowed = {
+    qaStandaloneFixAssets: menuQaStandaloneRunFix,
+    qaStandaloneBrandComplianceAudit: menuQaStandaloneBrandAudit,
+    qaStandaloneBrandComplianceFix: menuQaStandaloneBrandFix,
+    qaLengthAuditRun: menuQaLengthAudit,
+    qaLengthFixAllTooLong: menuQaLengthFixAllTooLong,
+    qaFixWeakAssets: qaFixWeakAssets,
+    generateBrandOptionBank: generateBrandOptionBank,
+    applyCampaignOptionPicks: applyCampaignOptionPicks
+  };
+  let ran = 0;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (step === "qaStandaloneBrandComplianceAuto") {
+      menuQaStandaloneBrandAudit();
+      ran++;
+      if (brandQaMode === "audit_and_fix") {
+        menuQaStandaloneBrandFix();
+        ran++;
+      }
+      continue;
+    }
+    const fn = allowed[step];
+    if (!fn) continue;
+    fn();
+    ran++;
+  }
+  ui.alert("QA batch complete. Steps run: " + ran + " | Brand QA mode: " + brandQaMode);
+}
+
+function showToolsPanel() {
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family:Arial,sans-serif;padding:12px;">
+      <h3 style="margin:0 0 8px 0;">Travel by Luxe Tools</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button onclick="run('generateAds')">Generate Ads</button>
+        <button onclick="run('generateAdsOneRowTest')">Generate 1 Row</button>
+        <button onclick="run('showSettingsMenu')">Settings</button>
+        <button onclick="run('showPromptExtractor')">Prompt Extractor</button>
+        <button onclick="run('qaFixWeakAssets')">QA Fix Weak Assets</button>
+        <button onclick="run('menuQaStandaloneRunFix')">QA Standalone Fix</button>
+        <button onclick="run('menuQaStandaloneBrandAudit')">QA Brand Audit</button>
+        <button onclick="run('menuQaStandaloneBrandFix')">QA Brand Fix</button>
+        <button onclick="run('menuQaStandaloneUndoLastRun')">QA Undo Last</button>
+        <button onclick="run('menuQaLengthAudit')">Length Audit</button>
+        <button onclick="run('menuQaLengthFixAllTooLong')">Length Auto Fix</button>
+        <button onclick="run('menuQaLengthShowMode')">Show Length Mode</button>
+        <button onclick="run('menuQaLengthModeDeterministic')">Mode: Deterministic</button>
+        <button onclick="run('menuQaLengthModeAiFallback')">Mode: AI Fallback</button>
+        <button onclick="run('menuQaLengthModeCompareBest')">Mode: Compare Best</button>
+        <button onclick="run('qaBatchRunSelected')">Run QA Batch</button>
+        <button onclick="run('generateBrandOptionBank')">Generate Option Bank</button>
+        <button onclick="run('applyCampaignOptionPicks')">Apply Option Picks</button>
+      </div>
+      <div id="status" style="margin-top:10px;color:#0b8043;"></div>
+    </div>
+    <script>
+      function run(fn) {
+        document.getElementById('status').textContent = 'Running ' + fn + '...';
+        google.script.run
+          .withSuccessHandler(function() {
+            document.getElementById('status').textContent = 'Done: ' + fn;
+          })
+          .withFailureHandler(function(err) {
+            document.getElementById('status').style.color = '#b31412';
+            document.getElementById('status').textContent = 'Failed: ' + err.message;
+          })[fn]();
+      }
+    </script>
+  `).setTitle("Tools Panel");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/* ===============================
+SETTINGS UI
+=============================== */
+
+function showSettingsMenu() {
+  const settings = getSettingsForSidebar_();
+  const selectedHeadlineIds = parseCsvIds_(settings.selectedHeadlineAngles, 4);
+  const selectedDescriptionIds = parseCsvIds_(settings.selectedDescriptionAngles, 3);
+  const headlineAngleCheckboxes = renderAngleCheckboxesHtml_(settings.angleOptions, selectedHeadlineIds, "headline");
+  const descriptionAngleCheckboxes = renderAngleCheckboxesHtml_(settings.angleOptions, selectedDescriptionIds, "description");
+  const headlineAssignmentMap = parseAngleAssignmentMap_(settings.angleAssignmentsHeadlines, 15);
+  const descriptionAssignmentMap = parseAngleAssignmentMap_(settings.angleAssignmentsDescriptions, 4);
+  const headlineAssignmentRows = renderAssignmentRowsHtml_(settings.angleOptions, headlineAssignmentMap, 15, 4, "headline");
+  const descriptionAssignmentRows = renderAssignmentRowsHtml_(settings.angleOptions, descriptionAssignmentMap, 4, 3, "description");
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family:Arial,sans-serif;padding:12px;">
+      <h3 style="margin:0 0 10px 0;">Travel by Luxe Settings</h3>
+      <div style="font-weight:bold;margin-top:8px;">Generation</div>
+      <label style="display:block;margin:8px 0;">
+        <input type="checkbox" id="lockShared" ${settings.lockShared ? "checked" : ""}>
+        Lock Shared Headlines (H6-H15)
+      </label>
+      <label style="display:block;margin:8px 0;">
+        <input type="checkbox" id="lockSharedDescriptions" ${settings.lockSharedDescriptions ? "checked" : ""}>
+        Lock Shared Descriptions (after specific slots)
+      </label>
+      <label style="display:block;margin:8px 0;">
+        <input type="checkbox" id="useExample" ${settings.useExample ? "checked" : ""}>
+        Use Example Style
+      </label>
+      <label style="display:block;margin:8px 0;">Specific headlines per ad group (3-5)
+        <input id="specificHeadlineCount" type="number" min="3" max="5" value="${settings.specificHeadlineCount}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Specific descriptions per ad group (1-3)
+        <input id="specificDescriptionCount" type="number" min="1" max="3" value="${settings.specificDescriptionCount}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Rows per run
+        <input id="rowLimit" type="number" min="1" max="200" value="${settings.rowLimit}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Batch delay (ms)
+        <input id="batchDelayMs" type="number" min="0" max="10000" value="${settings.batchDelayMs}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Model
+        <input id="openaiModel" value="${htmlEscape_(settings.openaiModel)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Temperature (0-1.5)
+        <input id="temperature" type="number" step="0.1" min="0" max="1.5" value="${settings.temperature}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <div style="font-weight:bold;margin-top:14px;">Brand Core</div>
+      <label style="display:block;margin:8px 0;">Brand name
+        <input id="brandName" value="${htmlEscape_(settings.brandName)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Brand website
+        <input id="brandWebsite" value="${htmlEscape_(settings.brandWebsite)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Positioning line 1
+        <input id="positioning1" value="${htmlEscape_(settings.positioning1)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Positioning line 2
+        <input id="positioning2" value="${htmlEscape_(settings.positioning2)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Customer promise
+        <textarea id="customerPromise" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.customerPromise)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Primary CTA
+        <input id="cta" value="${htmlEscape_(settings.cta)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <div style="font-weight:bold;margin-top:14px;">Messaging Controls</div>
+      <label style="display:block;margin:8px 0;">CTA mode
+        <select id="ctaMode" style="width:100%;box-sizing:border-box;">
+          <option value="balanced" ${settings.ctaMode === "balanced" ? "selected" : ""}>Balanced</option>
+          <option value="branded" ${settings.ctaMode === "branded" ? "selected" : ""}>Branded CTAs</option>
+          <option value="experience" ${settings.ctaMode === "experience" ? "selected" : ""}>Experience CTAs</option>
+        </select>
+      </label>
+      <label style="display:block;margin:8px 0;">Branded CTA list (one per line)
+        <textarea id="ctaBrandedList" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.ctaBrandedList)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Experience CTA list (one per line)
+        <textarea id="ctaExperienceList" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.ctaExperienceList)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Angle minimums for headlines (csv map, e.g. awards:1)
+        <input id="angleMinHeadlines" value="${htmlEscape_(settings.angleMinHeadlines)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Angle minimums for descriptions (csv map, e.g. awards:1)
+        <input id="angleMinDescriptions" value="${htmlEscape_(settings.angleMinDescriptions)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Angle library sheet
+        <input id="angleLibrarySheetName" value="${htmlEscape_(settings.angleLibrarySheetName)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <div style="margin:-2px 0 8px 0;">
+        <button type="button" onclick="createAngleLibrarySheet()" style="padding:6px 10px;">Create Brand Angles Sheet</button>
+        <small id="angleSheetStatus" style="display:block;color:#666;margin-top:6px;">${htmlEscape_(settings.angleOptionsSource === "sheet" ? ("Loaded from " + settings.angleLibrarySheetName + ".") : "Using starter angles. Create/populate the Brand Angles sheet for custom options.")}</small>
+      </div>
+      <label style="display:block;margin:8px 0;">Selected headline angles (pick up to 4)
+        <div id="headlineAngleCheckboxes" style="border:1px solid #ddd;border-radius:6px;padding:8px;max-height:140px;overflow:auto;background:#fff;">
+          ${headlineAngleCheckboxes}
+        </div>
+        <input id="selectedHeadlineAngles" value="${htmlEscape_(settings.selectedHeadlineAngles)}" style="display:none;">
+        <small id="headlineAngleCount" style="color:#666;display:block;margin-top:6px;"></small>
+      </label>
+      <label style="display:block;margin:8px 0;">Selected description angles (pick up to 3)
+        <div id="descriptionAngleCheckboxes" style="border:1px solid #ddd;border-radius:6px;padding:8px;max-height:140px;overflow:auto;background:#fff;">
+          ${descriptionAngleCheckboxes}
+        </div>
+        <input id="selectedDescriptionAngles" value="${htmlEscape_(settings.selectedDescriptionAngles)}" style="display:none;">
+        <small id="descriptionAngleCount" style="color:#666;display:block;margin-top:6px;"></small>
+      </label>
+      <label style="display:block;margin:8px 0;">Headline angle slot assignments
+        <div style="border:1px solid #ddd;border-radius:6px;padding:8px;background:#fff;">
+          ${headlineAssignmentRows}
+        </div>
+        <input id="angleAssignmentsHeadlines" value="${htmlEscape_(settings.angleAssignmentsHeadlines)}" style="display:none;">
+        <small id="headlineAssignmentPreview" style="color:#666;display:block;margin-top:6px;"></small>
+      </label>
+      <label style="display:block;margin:8px 0;">Description angle slot assignments
+        <div style="border:1px solid #ddd;border-radius:6px;padding:8px;background:#fff;">
+          ${descriptionAssignmentRows}
+        </div>
+        <input id="angleAssignmentsDescriptions" value="${htmlEscape_(settings.angleAssignmentsDescriptions)}" style="display:none;">
+        <small id="descriptionAssignmentPreview" style="color:#666;display:block;margin-top:6px;"></small>
+      </label>
+      <label style="display:block;margin:8px 0;">
+        <input type="checkbox" id="socialProofGoogle5StarEnabled" ${settings.socialProofGoogle5StarEnabled ? "checked" : ""}>
+        Enable Google 5-star social proof
+      </label>
+      <label style="display:block;margin:8px 0;">Google 5-star social-proof text
+        <input id="socialProofGoogle5StarText" value="${htmlEscape_(settings.socialProofGoogle5StarText)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Brand QA mode
+        <select id="brandQaMode" style="width:100%;box-sizing:border-box;">
+          <option value="audit_only" ${settings.brandQaMode === "audit_only" ? "selected" : ""}>Audit only</option>
+          <option value="audit_and_fix" ${settings.brandQaMode === "audit_and_fix" ? "selected" : ""}>Audit and Fix</option>
+        </select>
+      </label>
+      <label style="display:block;margin:8px 0;">Angle examples preview
+        <textarea id="anglePreview" rows="7" readonly style="width:100%;box-sizing:border-box;background:#f8f9fa;">${htmlEscape_(settings.anglePreview)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Event/occasion feedback rules
+        <textarea id="eventFeedbackAppend" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.eventFeedbackAppend)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Custom prompt append
+        <textarea id="customPromptAppend" rows="4" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.customPromptAppend)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Banned words/phrases
+        <textarea id="bannedWords" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.bannedWords)}</textarea>
+      </label>
+      <label style="display:block;margin:8px 0;">Off-shelf phrases
+        <textarea id="offShelfPhrases" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(settings.offShelfPhrases)}</textarea>
+      </label>
+      <div style="font-weight:bold;margin-top:14px;">Sheets</div>
+      <label style="display:block;margin:8px 0;">Ad sheet name
+        <input id="adSheetName" value="${htmlEscape_(settings.adSheetName)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Keyword sheet name
+        <input id="keywordSheetName" value="${htmlEscape_(settings.keywordSheetName)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Example style sheet name
+        <input id="exampleSheetName" value="${htmlEscape_(settings.exampleSheetName)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Fixed assets sheet name
+        <input id="fixedAssetsSheetName" value="${htmlEscape_(settings.fixedAssetsSheetName)}" style="width:100%;box-sizing:border-box;">
+      </label>
+      <button onclick="saveSettings()">Save</button>
+      <div id="status" style="margin-top:10px;color:#0b8043;"></div>
+    </div>
+    <script>
+      function getCheckedAngleIds(className, maxCount) {
+        const checked = Array.prototype.slice.call(document.querySelectorAll('.' + className + ':checked'));
+        if (checked.length > maxCount) {
+          for (let i = maxCount; i < checked.length; i++) checked[i].checked = false;
+        }
+        return Array.prototype.slice.call(document.querySelectorAll('.' + className + ':checked'))
+          .map(function(el) { return String(el.value || '').trim(); })
+          .filter(Boolean);
+      }
+
+      function syncSelectedAngles() {
+        const headlineIds = getCheckedAngleIds('angle-headline', 4);
+        const descriptionIds = getCheckedAngleIds('angle-description', 3);
+        document.getElementById('selectedHeadlineAngles').value = headlineIds.join(',');
+        document.getElementById('selectedDescriptionAngles').value = descriptionIds.join(',');
+        document.getElementById('headlineAngleCount').textContent = 'Selected: ' + headlineIds.length + '/4';
+        document.getElementById('descriptionAngleCount').textContent = 'Selected: ' + descriptionIds.length + '/3';
+      }
+
+      function buildAssignmentCsv(group) {
+        const rows = Array.prototype.slice.call(document.querySelectorAll('[data-assign-group="' + group + '"]'));
+        const map = {};
+        rows.forEach(function(row) {
+          const angleEl = row.querySelector('.assign-angle');
+          const slotEl = row.querySelector('.assign-slot');
+          const angle = String(angleEl && angleEl.value || '').trim().toLowerCase();
+          const slot = Number(String(slotEl && slotEl.value || '').trim());
+          if (!angle || !slot) return;
+          map[angle] = slot;
+        });
+        return Object.keys(map).map(function(id) { return id + ':' + map[id]; }).join(',');
+      }
+
+      function syncAssignmentInputs() {
+        const headlineCsv = buildAssignmentCsv('headline');
+        const descriptionCsv = buildAssignmentCsv('description');
+        const hInput = document.getElementById('angleAssignmentsHeadlines');
+        const dInput = document.getElementById('angleAssignmentsDescriptions');
+        const hPreview = document.getElementById('headlineAssignmentPreview');
+        const dPreview = document.getElementById('descriptionAssignmentPreview');
+        if (hInput) hInput.value = headlineCsv;
+        if (dInput) dInput.value = descriptionCsv;
+        if (hPreview) hPreview.textContent = headlineCsv ? ('Saved as: ' + headlineCsv) : 'No headline assignments selected';
+        if (dPreview) dPreview.textContent = descriptionCsv ? ('Saved as: ' + descriptionCsv) : 'No description assignments selected';
+      }
+
+      function createAngleLibrarySheet() {
+        const status = document.getElementById('angleSheetStatus');
+        if (status) {
+          status.style.color = '#666';
+          status.textContent = 'Creating sheet...';
+        }
+        google.script.run
+          .withSuccessHandler(function(msg) {
+            if (!status) return;
+            status.style.color = '#0b8043';
+            status.textContent = msg + ' Reopen Settings to refresh.';
+          })
+          .withFailureHandler(function(err) {
+            if (!status) return;
+            status.style.color = '#b31412';
+            status.textContent = 'Create failed: ' + err.message;
+          })
+          .createAngleLibrarySheetTemplateFromSidebar();
+      }
+
+      function saveSettings() {
+        syncSelectedAngles();
+        syncAssignmentInputs();
+        const payload = {
+          lockShared: document.getElementById('lockShared').checked,
+          lockSharedDescriptions: document.getElementById('lockSharedDescriptions').checked,
+          useExample: document.getElementById('useExample').checked,
+          specificHeadlineCount: Number(document.getElementById('specificHeadlineCount').value || 5),
+          specificDescriptionCount: Number(document.getElementById('specificDescriptionCount').value || 2),
+          rowLimit: Number(document.getElementById('rowLimit').value || 5),
+          batchDelayMs: Number(document.getElementById('batchDelayMs').value || 1200),
+          openaiModel: document.getElementById('openaiModel').value,
+          temperature: Number(document.getElementById('temperature').value || 0.4),
+          brandName: document.getElementById('brandName').value,
+          brandWebsite: document.getElementById('brandWebsite').value,
+          positioning1: document.getElementById('positioning1').value,
+          positioning2: document.getElementById('positioning2').value,
+          customerPromise: document.getElementById('customerPromise').value,
+          cta: document.getElementById('cta').value,
+          ctaMode: document.getElementById('ctaMode').value,
+          ctaBrandedList: document.getElementById('ctaBrandedList').value,
+          ctaExperienceList: document.getElementById('ctaExperienceList').value,
+          angleMinHeadlines: document.getElementById('angleMinHeadlines').value,
+          angleMinDescriptions: document.getElementById('angleMinDescriptions').value,
+          angleLibrarySheetName: document.getElementById('angleLibrarySheetName').value,
+          selectedHeadlineAngles: document.getElementById('selectedHeadlineAngles').value,
+          selectedDescriptionAngles: document.getElementById('selectedDescriptionAngles').value,
+          angleAssignmentsHeadlines: document.getElementById('angleAssignmentsHeadlines').value,
+          angleAssignmentsDescriptions: document.getElementById('angleAssignmentsDescriptions').value,
+          socialProofGoogle5StarEnabled: document.getElementById('socialProofGoogle5StarEnabled').checked,
+          socialProofGoogle5StarText: document.getElementById('socialProofGoogle5StarText').value,
+          brandQaMode: document.getElementById('brandQaMode').value,
+          eventFeedbackAppend: document.getElementById('eventFeedbackAppend').value,
+          customPromptAppend: document.getElementById('customPromptAppend').value,
+          bannedWords: document.getElementById('bannedWords').value,
+          offShelfPhrases: document.getElementById('offShelfPhrases').value,
+          adSheetName: document.getElementById('adSheetName').value,
+          keywordSheetName: document.getElementById('keywordSheetName').value,
+          exampleSheetName: document.getElementById('exampleSheetName').value,
+          fixedAssetsSheetName: document.getElementById('fixedAssetsSheetName').value
+        };
+        google.script.run
+          .withSuccessHandler(function(msg) {
+            document.getElementById('status').textContent = msg;
+          })
+          .withFailureHandler(function(err) {
+            document.getElementById('status').style.color = '#b31412';
+            document.getElementById('status').textContent = 'Save failed: ' + err.message;
+          })
+          .saveSettingsFromSidebar(payload);
+      }
+      syncSelectedAngles();
+      syncAssignmentInputs();
+    </script>
+  `).setTitle("Travel by Luxe Settings");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function getSettingsForSidebar_() {
+  const angleLibrarySheetName = getTextSetting_("ANGLE_LIBRARY_SHEET_NAME", DEFAULT_ANGLE_LIBRARY_SHEET);
+  const angleOptionsFromSheet = getBrandAngleLibrary_(angleLibrarySheetName);
+  const angleOptions = angleOptionsFromSheet.length ? angleOptionsFromSheet : getFallbackAngleOptions_();
+  return {
+    lockShared: getSetting("LOCK_SHARED_HEADLINES", false),
+    lockSharedDescriptions: getSetting("LOCK_SHARED_DESCRIPTIONS", false),
+    useExample: getUseExampleSetting_(),
+    specificHeadlineCount: getNumberSetting_("SPECIFIC_HEADLINE_COUNT", DEFAULT_SPECIFIC_HEADLINE_COUNT, 3, 5),
+    specificDescriptionCount: getNumberSetting_("SPECIFIC_DESCRIPTION_COUNT", DEFAULT_SPECIFIC_DESCRIPTION_COUNT, 1, 3),
+    rowLimit: getNumberSetting_("ROW_LIMIT", AD_TOOL_ROW_LIMIT, 1, 200),
+    batchDelayMs: getNumberSetting_("BATCH_DELAY_MS", DEFAULT_BATCH_DELAY_MS, 0, 10000),
+    openaiModel: getTextSetting_("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
+    temperature: getNumberSetting_("OPENAI_TEMPERATURE", DEFAULT_OPENAI_TEMPERATURE, 0, 1.5),
+    maxRetries: getNumberSetting_("MAX_RETRIES", DEFAULT_MAX_RETRIES, 0, 5),
+    retryBackoffMs: getNumberSetting_("RETRY_BACKOFF_MS", DEFAULT_RETRY_BACKOFF_MS, 0, 10000),
+    retryTemperature: getNumberSetting_("RETRY_TEMPERATURE", DEFAULT_RETRY_TEMPERATURE, 0, 1.5),
+    brandName: getTextSetting_("BRAND_NAME", "Travel by Luxe"),
+    brandWebsite: getTextSetting_("BRAND_WEBSITE", "travelbyluxe.com"),
+    positioning1: getTextSetting_("POSITIONING_LINE_1", "Ultra Luxury Private European Travel"),
+    positioning2: getTextSetting_("POSITIONING_LINE_2", "The Art of the Itinerary"),
+    customerPromise: getTextSetting_("CUSTOMER_PROMISE", "Private guided tours designed around each traveler\nTravel planning completely handled by experts"),
+    cta: getTextSetting_("CTA", "Request a Custom Proposal"),
+    ctaMode: getEnumSetting_("CTA_MODE", DEFAULT_CTA_MODE, ["branded", "experience", "balanced"]),
+    ctaBrandedList: getTextSetting_("CTA_BRANDED_LIST", DEFAULT_CTA_BRANDED_LIST),
+    ctaExperienceList: getTextSetting_("CTA_EXPERIENCE_LIST", DEFAULT_CTA_EXPERIENCE_LIST),
+    angleMinHeadlines: getTextSetting_("ANGLE_REQUIRED_MIN_HEADLINES", DEFAULT_ANGLE_MIN_HEADLINES),
+    angleMinDescriptions: getTextSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", DEFAULT_ANGLE_MIN_DESCRIPTIONS),
+    angleLibrarySheetName: angleLibrarySheetName,
+    angleOptions: angleOptions,
+    angleOptionsSource: angleOptionsFromSheet.length ? "sheet" : "fallback",
+    selectedHeadlineAngles: getTextSetting_("SELECTED_HEADLINE_ANGLES", DEFAULT_SELECTED_HEADLINE_ANGLES),
+    selectedDescriptionAngles: getTextSetting_("SELECTED_DESCRIPTION_ANGLES", DEFAULT_SELECTED_DESCRIPTION_ANGLES),
+    angleAssignmentsHeadlines: getTextSetting_("ANGLE_SLOT_ASSIGNMENTS_HEADLINES", DEFAULT_ANGLE_ASSIGNMENTS_HEADLINES),
+    angleAssignmentsDescriptions: getTextSetting_("ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS", DEFAULT_ANGLE_ASSIGNMENTS_DESCRIPTIONS),
+    socialProofGoogle5StarEnabled: getSetting("SOCIAL_PROOF_GOOGLE_5STAR_ENABLED", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_ENABLED === "true"),
+    socialProofGoogle5StarText: getTextSetting_("SOCIAL_PROOF_GOOGLE_5STAR_TEXT", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT),
+    brandQaMode: getEnumSetting_("BRAND_QA_MODE", DEFAULT_BRAND_QA_MODE, ["audit_only", "audit_and_fix"]),
+    anglePreview: getAnglePreviewText_(angleLibrarySheetName),
+    eventFeedbackAppend: getTextSetting_("EVENT_FEEDBACK_APPEND", DEFAULT_EVENT_FEEDBACK_APPEND),
+    bannedWords: getTextSetting_("BANNED_WORDS", DEFAULT_BANNED_WORDS),
+    offShelfPhrases: getTextSetting_("OFF_SHELF_WORDS", DEFAULT_OFF_SHELF_WORDS),
+    adSheetName: getTextSetting_("AD_SHEET_NAME", "Ad Copy"),
+    keywordSheetName: getTextSetting_("KEYWORD_SHEET_NAME", "List Of Keywords"),
+    exampleSheetName: getTextSetting_("EXAMPLE_SHEET_NAME", "Ad copy example"),
+    fixedAssetsSheetName: getTextSetting_("FIXED_ASSETS_SHEET_NAME", DEFAULT_FIXED_ASSETS_SHEET),
+    customPromptAppend: getTextSetting_("CUSTOM_PROMPT_APPEND", "")
+  };
+}
+
+function renderAngleCheckboxesHtml_(options, selectedIds, groupType) {
+  const selectedMap = {};
+  (selectedIds || []).forEach(function(id) { selectedMap[String(id || "").toLowerCase()] = true; });
+  const rows = (options || []).map(function(a) {
+    const id = String(a && a.id || "").toLowerCase().trim();
+    if (!id) return "";
+    const label = String(a && a.name || id).trim();
+    const checked = selectedMap[id] ? "checked" : "";
+    const cls = groupType === "description" ? "angle-description" : "angle-headline";
+    return '<label style="display:block;margin:4px 0;">' +
+      '<input type="checkbox" class="' + cls + '" value="' + htmlEscape_(id) + '" ' + checked + ' onchange="syncSelectedAngles()">' +
+      " " + htmlEscape_(label) + " (" + htmlEscape_(id) + ")" +
+      "</label>";
+  }).filter(Boolean);
+  if (!rows.length) {
+    return '<div style="color:#666;font-size:12px;">No angles found. Check your Brand Angles sheet and Angle library sheet setting.</div>';
+  }
+  return rows.join("");
+}
+
+function getFallbackAngleOptions_() {
+  return DEFAULT_FALLBACK_ANGLES.map(function(a) {
+    return {
+      id: String(a.id || "").toLowerCase().trim(),
+      name: String(a.name || "").trim(),
+      type: String(a.type || "both").toLowerCase().trim(),
+      focus: String(a.focus || "").trim(),
+      examples: Array.isArray(a.examples) ? a.examples.join(" | ") : String(a.examples || "")
+    };
+  });
+}
+
+function createAngleLibrarySheetTemplateFromSidebar() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const name = getTextSetting_("ANGLE_LIBRARY_SHEET_NAME", DEFAULT_ANGLE_LIBRARY_SHEET);
+  const existing = getBrandAngleLibrary_(name);
+  if (existing.length) {
+    return "Angle sheet '" + name + "' already has " + existing.length + " rows.";
+  }
+  const fallback = getFallbackAngleOptions_();
+  upsertBrandAnglesSheet_(ss, fallback, name);
+  return "Created '" + name + "' with " + fallback.length + " starter angles.";
+}
+
+function renderAssignmentRowsHtml_(options, assignmentMap, slotMax, rowCount, groupType) {
+  const entries = Object.keys(assignmentMap || {}).map(function(id) {
+    return { id: String(id || "").toLowerCase(), slot: Number(assignmentMap[id]) };
+  }).filter(function(e) { return e.id && isFinite(e.slot); }).sort(function(a, b) { return a.slot - b.slot; });
+  const angleChoices = ['<option value="">-- Select angle --</option>'].concat(
+    (options || []).map(function(a) {
+      const id = String(a && a.id || "").toLowerCase().trim();
+      const name = String(a && a.name || id).trim();
+      if (!id) return "";
+      return '<option value="' + htmlEscape_(id) + '">' + htmlEscape_(name) + " (" + htmlEscape_(id) + ")" + "</option>";
+    }).filter(Boolean)
+  );
+  const slotChoices = ['<option value="">-- Slot --</option>'];
+  for (let s = 1; s <= slotMax; s++) slotChoices.push('<option value="' + s + '">' + s + "</option>");
+  const rows = [];
+  for (let i = 0; i < rowCount; i++) {
+    const row = entries[i] || { id: "", slot: "" };
+    const angleOptions = angleChoices.map(function(opt) {
+      if (!row.id) return opt;
+      const selectedNeedle = 'value="' + htmlEscape_(row.id) + '"';
+      return opt.indexOf(selectedNeedle) >= 0 ? opt.replace(">", " selected>") : opt;
+    }).join("");
+    const slotOptions = slotChoices.map(function(opt) {
+      if (!row.slot) return opt;
+      const selectedNeedle = 'value="' + row.slot + '"';
+      return opt.indexOf(selectedNeedle) >= 0 ? opt.replace(">", " selected>") : opt;
+    }).join("");
+    rows.push(
+      '<div data-assign-group="' + htmlEscape_(groupType) + '" style="display:grid;grid-template-columns:1fr 90px;gap:8px;margin:6px 0;">' +
+      '<select class="assign-angle" onchange="syncAssignmentInputs()" style="width:100%;box-sizing:border-box;">' + angleOptions + "</select>" +
+      '<select class="assign-slot" onchange="syncAssignmentInputs()" style="width:100%;box-sizing:border-box;">' + slotOptions + "</select>" +
+      "</div>"
+    );
+  }
+  return rows.join("");
+}
+
+function saveSettingsFromSidebar(payload) {
+  payload = payload || {};
+  const has = (k) => Object.prototype.hasOwnProperty.call(payload, k);
+  // #region agent log
+  agentDebugLog_("H6", "ad_tool.txt:saveSettingsFromSidebar", "Saving settings payload", {
+    lockShared: has("lockShared") ? !!payload.lockShared : null,
+    lockSharedDescriptions: has("lockSharedDescriptions") ? !!payload.lockSharedDescriptions : null,
+    useExample: has("useExample") ? !!payload.useExample : null,
+    specificHeadlineCount: payload.specificHeadlineCount,
+    specificDescriptionCount: payload.specificDescriptionCount,
+    rowLimit: payload.rowLimit,
+    batchDelayMs: payload.batchDelayMs,
+    openaiModel: payload.openaiModel,
+    temperature: payload.temperature,
+    maxRetries: payload.maxRetries,
+    retryBackoffMs: payload.retryBackoffMs,
+    retryTemperature: payload.retryTemperature,
+    adSheetName: payload.adSheetName,
+    keywordSheetName: payload.keywordSheetName,
+    exampleSheetName: payload.exampleSheetName,
+    fixedAssetsSheetName: payload.fixedAssetsSheetName
+  }, "pre-fix");
+  // #endregion
+  if (has("lockShared")) setSetting("LOCK_SHARED_HEADLINES", !!payload.lockShared);
+  if (has("lockSharedDescriptions")) setSetting("LOCK_SHARED_DESCRIPTIONS", !!payload.lockSharedDescriptions);
+  if (has("useExample")) {
+    setSetting("USE_EXAMPLE_STYLE", !!payload.useExample);
+    setSetting("USE_LIRAN_STYLE", !!payload.useExample);
+  }
+  if (has("specificHeadlineCount")) setSetting("SPECIFIC_HEADLINE_COUNT", String(Math.max(3, Math.min(5, Number(payload.specificHeadlineCount || DEFAULT_SPECIFIC_HEADLINE_COUNT)))));
+  if (has("specificDescriptionCount")) setSetting("SPECIFIC_DESCRIPTION_COUNT", String(Math.max(1, Math.min(3, Number(payload.specificDescriptionCount || DEFAULT_SPECIFIC_DESCRIPTION_COUNT)))));
+  if (has("rowLimit")) setSetting("ROW_LIMIT", String(payload.rowLimit || AD_TOOL_ROW_LIMIT));
+  if (has("batchDelayMs")) setSetting("BATCH_DELAY_MS", String(payload.batchDelayMs || DEFAULT_BATCH_DELAY_MS));
+  if (has("openaiModel")) setSetting("OPENAI_MODEL", String(payload.openaiModel || DEFAULT_OPENAI_MODEL));
+  if (has("temperature")) setSetting("OPENAI_TEMPERATURE", String(payload.temperature == null ? DEFAULT_OPENAI_TEMPERATURE : payload.temperature));
+  if (has("maxRetries")) setSetting("MAX_RETRIES", String(payload.maxRetries == null ? DEFAULT_MAX_RETRIES : payload.maxRetries));
+  if (has("retryBackoffMs")) setSetting("RETRY_BACKOFF_MS", String(payload.retryBackoffMs == null ? DEFAULT_RETRY_BACKOFF_MS : payload.retryBackoffMs));
+  if (has("retryTemperature")) setSetting("RETRY_TEMPERATURE", String(payload.retryTemperature == null ? DEFAULT_RETRY_TEMPERATURE : payload.retryTemperature));
+  if (has("brandName")) setSetting("BRAND_NAME", String(payload.brandName || "Travel by Luxe"));
+  if (has("brandWebsite")) setSetting("BRAND_WEBSITE", String(payload.brandWebsite || "travelbyluxe.com"));
+  if (has("positioning1")) setSetting("POSITIONING_LINE_1", String(payload.positioning1 || ""));
+  if (has("positioning2")) setSetting("POSITIONING_LINE_2", String(payload.positioning2 || ""));
+  if (has("customerPromise")) setSetting("CUSTOMER_PROMISE", String(payload.customerPromise || ""));
+  if (has("cta")) setSetting("CTA", String(payload.cta || ""));
+  if (has("ctaMode")) setSetting("CTA_MODE", getNormalizedCtaMode_(payload.ctaMode));
+  if (has("ctaBrandedList")) setSetting("CTA_BRANDED_LIST", String(payload.ctaBrandedList || DEFAULT_CTA_BRANDED_LIST));
+  if (has("ctaExperienceList")) setSetting("CTA_EXPERIENCE_LIST", String(payload.ctaExperienceList || DEFAULT_CTA_EXPERIENCE_LIST));
+  if (has("angleMinHeadlines")) setSetting("ANGLE_REQUIRED_MIN_HEADLINES", String(payload.angleMinHeadlines || DEFAULT_ANGLE_MIN_HEADLINES));
+  if (has("angleMinDescriptions")) setSetting("ANGLE_REQUIRED_MIN_DESCRIPTIONS", String(payload.angleMinDescriptions || DEFAULT_ANGLE_MIN_DESCRIPTIONS));
+  if (has("angleLibrarySheetName")) setSetting("ANGLE_LIBRARY_SHEET_NAME", String(payload.angleLibrarySheetName || DEFAULT_ANGLE_LIBRARY_SHEET));
+  if (has("selectedHeadlineAngles")) setSetting("SELECTED_HEADLINE_ANGLES", qasLimitCsvList_(payload.selectedHeadlineAngles, 4) || DEFAULT_SELECTED_HEADLINE_ANGLES);
+  if (has("selectedDescriptionAngles")) setSetting("SELECTED_DESCRIPTION_ANGLES", qasLimitCsvList_(payload.selectedDescriptionAngles, 3) || DEFAULT_SELECTED_DESCRIPTION_ANGLES);
+  if (has("angleAssignmentsHeadlines")) setSetting("ANGLE_SLOT_ASSIGNMENTS_HEADLINES", String(payload.angleAssignmentsHeadlines || DEFAULT_ANGLE_ASSIGNMENTS_HEADLINES));
+  if (has("angleAssignmentsDescriptions")) setSetting("ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS", String(payload.angleAssignmentsDescriptions || DEFAULT_ANGLE_ASSIGNMENTS_DESCRIPTIONS));
+  if (has("socialProofGoogle5StarEnabled")) setSetting("SOCIAL_PROOF_GOOGLE_5STAR_ENABLED", !!payload.socialProofGoogle5StarEnabled);
+  if (has("socialProofGoogle5StarText")) setSetting("SOCIAL_PROOF_GOOGLE_5STAR_TEXT", String(payload.socialProofGoogle5StarText || DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT));
+  if (has("brandQaMode")) setSetting("BRAND_QA_MODE", getNormalizedBrandQaMode_(payload.brandQaMode));
+  if (has("eventFeedbackAppend")) setSetting("EVENT_FEEDBACK_APPEND", String(payload.eventFeedbackAppend || ""));
+  if (has("bannedWords")) setSetting("BANNED_WORDS", String(payload.bannedWords || ""));
+  if (has("offShelfPhrases")) setSetting("OFF_SHELF_WORDS", String(payload.offShelfPhrases || ""));
+  if (has("adSheetName")) setSetting("AD_SHEET_NAME", String(payload.adSheetName || "Ad Copy"));
+  if (has("keywordSheetName")) setSetting("KEYWORD_SHEET_NAME", String(payload.keywordSheetName || "List Of Keywords"));
+  if (has("exampleSheetName")) setSetting("EXAMPLE_SHEET_NAME", String(payload.exampleSheetName || "Ad copy example"));
+  if (has("fixedAssetsSheetName")) setSetting("FIXED_ASSETS_SHEET_NAME", String(payload.fixedAssetsSheetName || DEFAULT_FIXED_ASSETS_SHEET));
+  if (has("customPromptAppend")) setSetting("CUSTOM_PROMPT_APPEND", String(payload.customPromptAppend || ""));
+  return "Settings saved";
+}
+
+function getUseExampleSetting_() {
+  const scriptProps = PropertiesService.getScriptProperties();
+  const current = scriptProps.getProperty("USE_EXAMPLE_STYLE");
+  if (current !== null) return current === "true";
+  const legacy = scriptProps.getProperty("USE_LIRAN_STYLE");
+  return legacy === "true";
+}
+
+function resetDynamicSettings() {
+  const defaults = {
+    ROW_LIMIT: String(AD_TOOL_ROW_LIMIT),
+    BATCH_DELAY_MS: String(DEFAULT_BATCH_DELAY_MS),
+    OPENAI_MODEL: DEFAULT_OPENAI_MODEL,
+    OPENAI_TEMPERATURE: String(DEFAULT_OPENAI_TEMPERATURE),
+    MAX_RETRIES: String(DEFAULT_MAX_RETRIES),
+    RETRY_BACKOFF_MS: String(DEFAULT_RETRY_BACKOFF_MS),
+    RETRY_TEMPERATURE: String(DEFAULT_RETRY_TEMPERATURE),
+    SPECIFIC_HEADLINE_COUNT: String(DEFAULT_SPECIFIC_HEADLINE_COUNT),
+    SPECIFIC_DESCRIPTION_COUNT: String(DEFAULT_SPECIFIC_DESCRIPTION_COUNT),
+    LOCK_SHARED_DESCRIPTIONS: "false",
+    CTA_MODE: DEFAULT_CTA_MODE,
+    CTA_BRANDED_LIST: DEFAULT_CTA_BRANDED_LIST,
+    CTA_EXPERIENCE_LIST: DEFAULT_CTA_EXPERIENCE_LIST,
+    ANGLE_REQUIRED_MIN_HEADLINES: DEFAULT_ANGLE_MIN_HEADLINES,
+    ANGLE_REQUIRED_MIN_DESCRIPTIONS: DEFAULT_ANGLE_MIN_DESCRIPTIONS,
+    ANGLE_LIBRARY_SHEET_NAME: DEFAULT_ANGLE_LIBRARY_SHEET,
+    SELECTED_HEADLINE_ANGLES: DEFAULT_SELECTED_HEADLINE_ANGLES,
+    SELECTED_DESCRIPTION_ANGLES: DEFAULT_SELECTED_DESCRIPTION_ANGLES,
+    ANGLE_SLOT_ASSIGNMENTS_HEADLINES: DEFAULT_ANGLE_ASSIGNMENTS_HEADLINES,
+    ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS: DEFAULT_ANGLE_ASSIGNMENTS_DESCRIPTIONS,
+    SOCIAL_PROOF_GOOGLE_5STAR_ENABLED: DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_ENABLED,
+    SOCIAL_PROOF_GOOGLE_5STAR_TEXT: DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT,
+    BRAND_QA_MODE: DEFAULT_BRAND_QA_MODE,
+    EVENT_FEEDBACK_APPEND: DEFAULT_EVENT_FEEDBACK_APPEND,
+    FIXED_ASSETS_SHEET_NAME: DEFAULT_FIXED_ASSETS_SHEET,
+    BRAND_NAME: "Travel by Luxe",
+    BRAND_WEBSITE: "travelbyluxe.com",
+    POSITIONING_LINE_1: "Ultra Luxury Private European Travel",
+    POSITIONING_LINE_2: "The Art of the Itinerary",
+    CUSTOMER_PROMISE: "Private guided tours designed around each traveler\nTravel planning completely handled by experts",
+    CTA: "Request a Custom Proposal",
+    BANNED_WORDS: DEFAULT_BANNED_WORDS,
+    OFF_SHELF_WORDS: DEFAULT_OFF_SHELF_WORDS,
+    AD_SHEET_NAME: "Ad Copy",
+    KEYWORD_SHEET_NAME: "List Of Keywords",
+    EXAMPLE_SHEET_NAME: "Ad copy example",
+    CUSTOM_PROMPT_APPEND: ""
+  };
+  Object.keys(defaults).forEach(k => setSetting(k, defaults[k]));
+  SpreadsheetApp.getUi().alert("Dynamic settings reset to defaults.");
+}
+
+function applyFastBatchPreset() {
+  setSetting("ROW_LIMIT", "20");
+  setSetting("BATCH_DELAY_MS", "500");
+  setSetting("OPENAI_TEMPERATURE", "0.5");
+  setSetting("MAX_RETRIES", "1");
+  setSetting("RETRY_BACKOFF_MS", "350");
+  setSetting("RETRY_TEMPERATURE", "0.2");
+  SpreadsheetApp.getUi().alert("Fast batch preset applied.");
+}
+
+function applyQualityBatchPreset() {
+  setSetting("ROW_LIMIT", "5");
+  setSetting("BATCH_DELAY_MS", "1500");
+  setSetting("OPENAI_TEMPERATURE", "0.3");
+  setSetting("MAX_RETRIES", "2");
+  setSetting("RETRY_BACKOFF_MS", "700");
+  setSetting("RETRY_TEMPERATURE", "0.2");
+  SpreadsheetApp.getUi().alert("Quality batch preset applied.");
+}
+
+function showCurrentSettings() {
+  const message = buildBrandManifestSummaryFromSettings_();
+  SpreadsheetApp.getUi().alert("Current Dynamic Settings", message, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function buildBrandManifestSummaryFromSettings_() {
+  const s = getSettingsForSidebar_();
+  return [
+    "Brand Manifest Summary",
+    "",
+    "Brand: " + s.brandName,
+    "Website: " + s.brandWebsite,
+    "Positioning 1: " + s.positioning1,
+    "Positioning 2: " + s.positioning2,
+    "Customer Promise: " + s.customerPromise,
+    "CTA: " + s.cta,
+    "CTA Mode: " + s.ctaMode,
+    "Branded CTA List: " + s.ctaBrandedList,
+    "Experience CTA List: " + s.ctaExperienceList,
+    "Selected Headline Angles: " + s.selectedHeadlineAngles,
+    "Selected Description Angles: " + s.selectedDescriptionAngles,
+    "Headline Angle Assignments: " + s.angleAssignmentsHeadlines,
+    "Description Angle Assignments: " + s.angleAssignmentsDescriptions,
+    "Google 5-Star Enabled: " + s.socialProofGoogle5StarEnabled,
+    "Google 5-Star Text: " + s.socialProofGoogle5StarText,
+    "Brand QA Mode: " + s.brandQaMode,
+    "Event Feedback: " + s.eventFeedbackAppend,
+    "Use Example Style: " + s.useExample,
+    "Lock Shared Headlines: " + s.lockShared,
+    "Lock Shared Descriptions: " + s.lockSharedDescriptions,
+    "Specific Headlines: " + s.specificHeadlineCount,
+    "Specific Descriptions: " + s.specificDescriptionCount,
+    "Angle Min Headlines: " + s.angleMinHeadlines,
+    "Angle Min Descriptions: " + s.angleMinDescriptions,
+    "Banned Words: " + s.bannedWords,
+    "Off-Shelf Phrases: " + s.offShelfPhrases,
+    "Custom Prompt Rules: " + s.customPromptAppend,
+    "",
+    "Rows/run: " + s.rowLimit,
+    "Batch Delay(ms): " + s.batchDelayMs,
+    "Model: " + s.openaiModel,
+    "Temperature: " + s.temperature,
+    "Max Retries: " + s.maxRetries,
+    "Retry Backoff(ms): " + s.retryBackoffMs,
+    "Retry Temperature: " + s.retryTemperature,
+    "",
+    "Ad Sheet: " + s.adSheetName,
+    "Keyword Sheet: " + s.keywordSheetName,
+    "Example Sheet: " + s.exampleSheetName,
+    "Fixed Assets Sheet: " + s.fixedAssetsSheetName
+  ].join("\n");
+}
+
+function buildBrandManifestSummaryFromExtract_(e) {
+  const x = e || {};
+  return [
+    "Extracted Brand Manifest Summary",
+    "",
+    "Brand: " + (x.brandName || ""),
+    "Website: " + (x.brandWebsite || ""),
+    "Positioning 1: " + (x.positioning1 || ""),
+    "Positioning 2: " + (x.positioning2 || ""),
+    "Customer Promise: " + (x.customerPromise || ""),
+    "CTA: " + (x.cta || ""),
+    "CTA Mode: " + (x.ctaMode || ""),
+    "Branded CTA List: " + (x.ctaBrandedList || ""),
+    "Experience CTA List: " + (x.ctaExperienceList || ""),
+    "Selected Headline Angles: " + (x.selectedHeadlineAngles || ""),
+    "Selected Description Angles: " + (x.selectedDescriptionAngles || ""),
+    "Headline Angle Assignments: " + (x.angleAssignmentsHeadlines || ""),
+    "Description Angle Assignments: " + (x.angleAssignmentsDescriptions || ""),
+    "Google 5-Star Enabled: " + (x.socialProofGoogle5StarEnabled == null ? "" : x.socialProofGoogle5StarEnabled),
+    "Google 5-Star Text: " + (x.socialProofGoogle5StarText || ""),
+    "Brand QA Mode: " + (x.brandQaMode || ""),
+    "Event Feedback: " + (x.eventFeedbackAppend || ""),
+    "Use Example Style: " + (x.useExample == null ? "" : x.useExample),
+    "Lock Shared Headlines: " + (x.lockShared == null ? "" : x.lockShared),
+    "Lock Shared Descriptions: " + (x.lockSharedDescriptions == null ? "" : x.lockSharedDescriptions),
+    "Specific Headlines: " + (x.specificHeadlineCount == null ? "" : x.specificHeadlineCount),
+    "Specific Descriptions: " + (x.specificDescriptionCount == null ? "" : x.specificDescriptionCount),
+    "Angle Min Headlines: " + (x.angleMinHeadlines || ""),
+    "Angle Min Descriptions: " + (x.angleMinDescriptions || ""),
+    "Banned Words: " + ((x.bannedWords || []).join(", ")),
+    "Off-Shelf Phrases: " + ((x.offShelfPhrases || []).join(", ")),
+    "Custom Prompt Rules: " + (x.customPromptAppend || ""),
+    "",
+    "Rows/run: " + (x.rowLimit == null ? "" : x.rowLimit),
+    "Batch Delay(ms): " + (x.batchDelayMs == null ? "" : x.batchDelayMs),
+    "Model: " + (x.openaiModel || ""),
+    "Temperature: " + (x.temperature == null ? "" : x.temperature),
+    "",
+    "Ad Sheet: " + (x.adSheetName || ""),
+    "Keyword Sheet: " + (x.keywordSheetName || ""),
+    "Example Sheet: " + (x.exampleSheetName || ""),
+    "Fixed Assets Sheet: " + (x.fixedAssetsSheetName || "")
+  ].join("\n");
+}
+
+function showBrandManifestSummaryPopup(summaryText) {
+  const summary = String(summaryText || buildBrandManifestSummaryFromSettings_());
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;padding:12px;">' +
+      '<h3 style="margin:0 0 10px 0;">Brand Manifest Summary</h3>' +
+      '<textarea style="width:100%;height:420px;box-sizing:border-box;">' + htmlEscape_(summary) + '</textarea>' +
+    '</div>'
+  ).setWidth(720).setHeight(520);
+  SpreadsheetApp.getUi().showModalDialog(html, "Brand Manifest Summary");
+}
+
+function showPromptExtractor() {
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family:Arial,sans-serif;padding:12px;">
+      <h3 style="margin:0 0 10px 0;">Prompt Extractor</h3>
+      <div style="font-size:12px;color:#555;margin-bottom:8px;">
+        Add website + doc URL + pasted text. The tool extracts brand prompt fields and exclusions.
+      </div>
+      <label style="display:block;margin:8px 0;">Website URL
+        <input id="websiteUrl" placeholder="https://example.com" style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Google Doc URL (optional)
+        <input id="docUrl" placeholder="https://docs.google.com/document/d/..." style="width:100%;box-sizing:border-box;">
+      </label>
+      <label style="display:block;margin:8px 0;">Pasted brand text (optional)
+        <textarea id="sourceText" rows="10" style="width:100%;box-sizing:border-box;"></textarea>
+      </label>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button onclick="extractOnly()">Extract</button>
+        <button onclick="extractAndApply()">Extract + Apply</button>
+      </div>
+      <label style="display:block;margin-top:8px;">
+        <input id="showPopup" type="checkbox" checked>
+        Show Brand Manifest popup after extraction
+      </label>
+      <div id="status" style="margin-top:10px;color:#0b8043;"></div>
+      <textarea id="result" rows="12" style="margin-top:10px;width:100%;box-sizing:border-box;"></textarea>
+    </div>
+    <script>
+      function payload(apply) {
+        return {
+          websiteUrl: document.getElementById('websiteUrl').value,
+          docUrl: document.getElementById('docUrl').value,
+          sourceText: document.getElementById('sourceText').value,
+          apply: !!apply,
+          showPopup: document.getElementById('showPopup').checked
+        };
+      }
+      function setBusy(msg) {
+        document.getElementById('status').style.color = '#1a73e8';
+        document.getElementById('status').textContent = msg;
+      }
+      function setOk(msg) {
+        document.getElementById('status').style.color = '#0b8043';
+        document.getElementById('status').textContent = msg;
+      }
+      function setErr(msg) {
+        document.getElementById('status').style.color = '#b31412';
+        document.getElementById('status').textContent = msg;
+      }
+      function run(apply) {
+        setBusy('Processing...');
+        google.script.run
+          .withSuccessHandler(function(res) {
+            document.getElementById('result').value = JSON.stringify(res.extracted, null, 2);
+            if (res.manifestSummary && payload(apply).showPopup) {
+              google.script.run.showBrandManifestSummaryPopup(res.manifestSummary);
+            }
+            setOk(res.message || 'Done');
+          })
+          .withFailureHandler(function(err) {
+            setErr('Failed: ' + err.message);
+          })
+          .extractPromptSettings(payload(apply));
+      }
+      function extractOnly() { run(false); }
+      function extractAndApply() { run(true); }
+    </script>
+  `).setTitle("Prompt Extractor");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function extractPromptSettings(payload) {
+  const websiteUrl = String(payload && payload.websiteUrl || "").trim();
+  const docUrl = String(payload && payload.docUrl || "").trim();
+  const sourceText = String(payload && payload.sourceText || "").trim();
+  const apply = !!(payload && payload.apply);
+
+  let docText = "";
+  if (docUrl) {
+    docText = getGoogleDocTextFromUrl_(docUrl);
+  }
+
+  const mergedSource = [
+    websiteUrl ? ("Website: " + websiteUrl) : "",
+    docText ? ("Google Doc Content:\n" + docText) : "",
+    sourceText ? ("Pasted Content:\n" + sourceText) : ""
+  ].filter(Boolean).join("\n\n");
+
+  if (!mergedSource) {
+    throw new Error("Provide at least one source: website URL, Google Doc URL, or pasted text.");
+  }
+
+  // #region agent log
+  agentDebugLog_("H12", "ad_tool.txt:extractPromptSettings", "Extractor inputs received", {
+    hasWebsiteUrl: !!websiteUrl,
+    hasDocUrl: !!docUrl,
+    hasSourceText: !!sourceText,
+    apply: apply
+  }, "pre-fix");
+  // #endregion
+
+  const extractionPrompt = buildExtractionPrompt_(mergedSource);
+  const rawExtracted = callOpenAIJson(extractionPrompt, {
+    model: getTextSetting_("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
+    temperature: 0.2
+  });
+  const extracted = normalizeExtractedSettings_(rawExtracted);
+  const manifestSummary = buildBrandManifestSummaryFromExtract_(extracted);
+
+  if (apply) {
+    applyExtractedSettings_(extracted);
+  }
+
+  return {
+    message: apply ? "Extracted and applied to settings." : "Extracted successfully.",
+    extracted: extracted,
+    manifestSummary: manifestSummary
+  };
+}
+
+function getGoogleDocTextFromUrl_(docUrl) {
+  const match = String(docUrl).match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!match || !match[1]) throw new Error("Invalid Google Doc URL.");
+  const docId = match[1];
+  const doc = DocumentApp.openById(docId);
+  return doc.getBody().getText().slice(0, 25000);
+}
+
+function buildExtractionPrompt_(sourceText) {
+  return `
+Extract structured brand settings for ALL dynamic settings fields from the source text below.
+
+Source text:
+${sourceText.slice(0, 30000)}
+
+Return ONLY valid JSON with this exact shape:
+{
+  "brandName": "string",
+  "brandWebsite": "string",
+  "positioning1": "string",
+  "positioning2": "string",
+  "customerPromise": "string",
+  "cta": "string",
+  "ctaMode": "balanced",
+  "ctaBrandedList": "line1\\nline2",
+  "ctaExperienceList": "line1\\nline2",
+  "specificHeadlineCount": 5,
+  "specificDescriptionCount": 2,
+  "lockSharedDescriptions": false,
+  "angleMinHeadlines": "awards:1",
+  "angleMinDescriptions": "awards:1",
+  "angleLibrarySheetName": "Brand Angles",
+  "selectedHeadlineAngles": "anti-hassle,social-proof",
+  "selectedDescriptionAngles": "social-proof,memory-architect",
+  "angleAssignmentsHeadlines": "social-proof:4",
+  "angleAssignmentsDescriptions": "social-proof:2",
+  "socialProofGoogle5StarEnabled": true,
+  "socialProofGoogle5StarText": "Rated 5 stars across Google",
+  "brandQaMode": "audit_only",
+  "angles": [
+    {
+      "id": "anti-hassle",
+      "name": "Anti-Hassle",
+      "focus": "Logistics, seamlessness, support",
+      "type": "both",
+      "examples": ["Stress-Free European Tours", "We handle every detail"]
+    }
+  ],
+  "eventFeedbackAppend": "string",
+  "fixedAssetsSheetName": "Brand Fixed Assets",
+  "bannedWords": ["word1","word2"],
+  "offShelfPhrases": ["phrase1","phrase2"],
+  "customPromptAppend": "string",
+  "useExample": true,
+  "lockShared": true,
+  "rowLimit": 5,
+  "batchDelayMs": 1200,
+  "openaiModel": "gpt-4o-mini",
+  "temperature": 0.4,
+  "adSheetName": "Ad Copy",
+  "keywordSheetName": "List Of Keywords",
+  "exampleSheetName": "Ad copy example"
+}
+
+Rules:
+- Infer concise and useful values for ad generation.
+- bannedWords should include AI-jargon, vague words, and style no-go words.
+- offShelfPhrases should include generic package/deal language and mass-market wording.
+- Set useExample=true when examples or writing style references are present.
+- lockShared=true if source implies universal assets shared across ad groups.
+- lockSharedDescriptions=true if source implies reusable description slots across ad groups.
+- specificHeadlineCount should be 3 to 5.
+- specificDescriptionCount should be 1 to 3.
+- ctaMode should be one of branded, experience, balanced.
+- include 4-8 useful brand angles if possible.
+- include socialProofGoogle5StarEnabled=true when credible signals exist for Google 5-star ratings.
+- selectedHeadlineAngles should include 1 to 4 ids from angles.
+- selectedDescriptionAngles should include 1 to 3 ids from angles.
+- If technical fields are not inferable, use safe defaults:
+  rowLimit=5, batchDelayMs=1200, openaiModel="gpt-4o-mini", temperature=0.4,
+  adSheetName="Ad Copy", keywordSheetName="List Of Keywords", exampleSheetName="Ad copy example".
+`;
+}
+
+function applyExtractedSettings_(obj) {
+  const out = obj || {};
+  setSetting("BRAND_NAME", String(out.brandName || getTextSetting_("BRAND_NAME", "Travel by Luxe")));
+  setSetting("BRAND_WEBSITE", String(out.brandWebsite || getTextSetting_("BRAND_WEBSITE", "travelbyluxe.com")));
+  setSetting("POSITIONING_LINE_1", String(out.positioning1 || getTextSetting_("POSITIONING_LINE_1", "")));
+  setSetting("POSITIONING_LINE_2", String(out.positioning2 || getTextSetting_("POSITIONING_LINE_2", "")));
+  setSetting("CUSTOMER_PROMISE", String(out.customerPromise || getTextSetting_("CUSTOMER_PROMISE", "")));
+  setSetting("CTA", String(out.cta || getTextSetting_("CTA", "")));
+  setSetting("CTA_MODE", getNormalizedCtaMode_(out.ctaMode));
+  setSetting("CTA_BRANDED_LIST", String(out.ctaBrandedList || getTextSetting_("CTA_BRANDED_LIST", DEFAULT_CTA_BRANDED_LIST)));
+  setSetting("CTA_EXPERIENCE_LIST", String(out.ctaExperienceList || getTextSetting_("CTA_EXPERIENCE_LIST", DEFAULT_CTA_EXPERIENCE_LIST)));
+  setSetting("ANGLE_LIBRARY_SHEET_NAME", String(out.angleLibrarySheetName || getTextSetting_("ANGLE_LIBRARY_SHEET_NAME", DEFAULT_ANGLE_LIBRARY_SHEET)));
+  setSetting("SELECTED_HEADLINE_ANGLES", qasLimitCsvList_(out.selectedHeadlineAngles, 4) || getTextSetting_("SELECTED_HEADLINE_ANGLES", DEFAULT_SELECTED_HEADLINE_ANGLES));
+  setSetting("SELECTED_DESCRIPTION_ANGLES", qasLimitCsvList_(out.selectedDescriptionAngles, 3) || getTextSetting_("SELECTED_DESCRIPTION_ANGLES", DEFAULT_SELECTED_DESCRIPTION_ANGLES));
+  setSetting("ANGLE_SLOT_ASSIGNMENTS_HEADLINES", String(out.angleAssignmentsHeadlines || getTextSetting_("ANGLE_SLOT_ASSIGNMENTS_HEADLINES", DEFAULT_ANGLE_ASSIGNMENTS_HEADLINES)));
+  setSetting("ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS", String(out.angleAssignmentsDescriptions || getTextSetting_("ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS", DEFAULT_ANGLE_ASSIGNMENTS_DESCRIPTIONS)));
+  setSetting("SOCIAL_PROOF_GOOGLE_5STAR_ENABLED", String(!!(out.socialProofGoogle5StarEnabled == null ? getSetting("SOCIAL_PROOF_GOOGLE_5STAR_ENABLED", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_ENABLED === "true") : out.socialProofGoogle5StarEnabled)));
+  setSetting("SOCIAL_PROOF_GOOGLE_5STAR_TEXT", String(out.socialProofGoogle5StarText || getTextSetting_("SOCIAL_PROOF_GOOGLE_5STAR_TEXT", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT)));
+  setSetting("BRAND_QA_MODE", getNormalizedBrandQaMode_(out.brandQaMode));
+  setSetting("SPECIFIC_HEADLINE_COUNT", String(Math.max(3, Math.min(5, Number(out.specificHeadlineCount == null ? getNumberSetting_("SPECIFIC_HEADLINE_COUNT", DEFAULT_SPECIFIC_HEADLINE_COUNT, 3, 5) : out.specificHeadlineCount)))));
+  setSetting("SPECIFIC_DESCRIPTION_COUNT", String(Math.max(1, Math.min(3, Number(out.specificDescriptionCount == null ? getNumberSetting_("SPECIFIC_DESCRIPTION_COUNT", DEFAULT_SPECIFIC_DESCRIPTION_COUNT, 1, 3) : out.specificDescriptionCount)))));
+  setSetting("LOCK_SHARED_DESCRIPTIONS", String(!!(out.lockSharedDescriptions == null ? getSetting("LOCK_SHARED_DESCRIPTIONS", false) : out.lockSharedDescriptions)));
+  setSetting("ANGLE_REQUIRED_MIN_HEADLINES", String(out.angleMinHeadlines || getTextSetting_("ANGLE_REQUIRED_MIN_HEADLINES", DEFAULT_ANGLE_MIN_HEADLINES)));
+  setSetting("ANGLE_REQUIRED_MIN_DESCRIPTIONS", String(out.angleMinDescriptions || getTextSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", DEFAULT_ANGLE_MIN_DESCRIPTIONS)));
+  setSetting("EVENT_FEEDBACK_APPEND", String(out.eventFeedbackAppend || getTextSetting_("EVENT_FEEDBACK_APPEND", DEFAULT_EVENT_FEEDBACK_APPEND)));
+  setSetting("FIXED_ASSETS_SHEET_NAME", String(out.fixedAssetsSheetName || getTextSetting_("FIXED_ASSETS_SHEET_NAME", DEFAULT_FIXED_ASSETS_SHEET)));
+  setSetting("BANNED_WORDS", Array.isArray(out.bannedWords) ? out.bannedWords.join(",") : getTextSetting_("BANNED_WORDS", DEFAULT_BANNED_WORDS));
+  setSetting("OFF_SHELF_WORDS", Array.isArray(out.offShelfPhrases) ? out.offShelfPhrases.join(",") : getTextSetting_("OFF_SHELF_WORDS", DEFAULT_OFF_SHELF_WORDS));
+  setSetting("CUSTOM_PROMPT_APPEND", String(out.customPromptAppend || getTextSetting_("CUSTOM_PROMPT_APPEND", "")));
+  const useExample = !!(out.useExample == null ? getUseExampleSetting_() : out.useExample);
+  setSetting("USE_EXAMPLE_STYLE", String(useExample));
+  setSetting("USE_LIRAN_STYLE", String(useExample));
+  setSetting("LOCK_SHARED_HEADLINES", String(!!(out.lockShared == null ? getSetting("LOCK_SHARED_HEADLINES", false) : out.lockShared)));
+  setSetting("ROW_LIMIT", String(out.rowLimit == null ? getNumberSetting_("ROW_LIMIT", AD_TOOL_ROW_LIMIT, 1, 200) : Number(out.rowLimit)));
+  setSetting("BATCH_DELAY_MS", String(out.batchDelayMs == null ? getNumberSetting_("BATCH_DELAY_MS", DEFAULT_BATCH_DELAY_MS, 0, 10000) : Number(out.batchDelayMs)));
+  setSetting("OPENAI_MODEL", String(out.openaiModel || getTextSetting_("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)));
+  setSetting("OPENAI_TEMPERATURE", String(out.temperature == null ? getNumberSetting_("OPENAI_TEMPERATURE", DEFAULT_OPENAI_TEMPERATURE, 0, 1.5) : Number(out.temperature)));
+  setSetting("AD_SHEET_NAME", String(out.adSheetName || getTextSetting_("AD_SHEET_NAME", "Ad Copy")));
+  setSetting("KEYWORD_SHEET_NAME", String(out.keywordSheetName || getTextSetting_("KEYWORD_SHEET_NAME", "List Of Keywords")));
+  setSetting("EXAMPLE_SHEET_NAME", String(out.exampleSheetName || getTextSetting_("EXAMPLE_SHEET_NAME", "Ad copy example")));
+  if (Array.isArray(out.angles) && out.angles.length) {
+    upsertBrandAnglesSheet_(SpreadsheetApp.getActiveSpreadsheet(), out.angles, getTextSetting_("ANGLE_LIBRARY_SHEET_NAME", DEFAULT_ANGLE_LIBRARY_SHEET));
+  }
+}
+
+function normalizeExtractedSettings_(obj) {
+  const out = obj || {};
+  const toBool = (v, d) => (v == null ? d : !!v);
+  const toNum = (v, d) => {
+    const n = Number(v);
+    return isFinite(n) ? n : d;
+  };
+  return {
+    brandName: String(out.brandName || ""),
+    brandWebsite: String(out.brandWebsite || ""),
+    positioning1: String(out.positioning1 || ""),
+    positioning2: String(out.positioning2 || ""),
+    customerPromise: String(out.customerPromise || ""),
+    cta: String(out.cta || ""),
+    ctaMode: getNormalizedCtaMode_(out.ctaMode),
+    ctaBrandedList: String(out.ctaBrandedList || ""),
+    ctaExperienceList: String(out.ctaExperienceList || ""),
+    angleLibrarySheetName: String(out.angleLibrarySheetName || getTextSetting_("ANGLE_LIBRARY_SHEET_NAME", DEFAULT_ANGLE_LIBRARY_SHEET)),
+    selectedHeadlineAngles: qasLimitCsvList_(out.selectedHeadlineAngles, 4),
+    selectedDescriptionAngles: qasLimitCsvList_(out.selectedDescriptionAngles, 3),
+    angleAssignmentsHeadlines: String(out.angleAssignmentsHeadlines || ""),
+    angleAssignmentsDescriptions: String(out.angleAssignmentsDescriptions || ""),
+    socialProofGoogle5StarEnabled: toBool(out.socialProofGoogle5StarEnabled, getSetting("SOCIAL_PROOF_GOOGLE_5STAR_ENABLED", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_ENABLED === "true")),
+    socialProofGoogle5StarText: String(out.socialProofGoogle5StarText || getTextSetting_("SOCIAL_PROOF_GOOGLE_5STAR_TEXT", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT)),
+    brandQaMode: getNormalizedBrandQaMode_(out.brandQaMode),
+    angles: Array.isArray(out.angles) ? out.angles.map(function(a) {
+      return {
+        id: String(a && a.id || ""),
+        name: String(a && a.name || ""),
+        focus: String(a && a.focus || ""),
+        type: String(a && a.type || "both"),
+        examples: Array.isArray(a && a.examples) ? a.examples.map(String) : []
+      };
+    }).filter(function(a) { return !!a.id; }) : [],
+    specificHeadlineCount: Math.max(3, Math.min(5, toNum(out.specificHeadlineCount, getNumberSetting_("SPECIFIC_HEADLINE_COUNT", DEFAULT_SPECIFIC_HEADLINE_COUNT, 3, 5)))),
+    specificDescriptionCount: Math.max(1, Math.min(3, toNum(out.specificDescriptionCount, getNumberSetting_("SPECIFIC_DESCRIPTION_COUNT", DEFAULT_SPECIFIC_DESCRIPTION_COUNT, 1, 3)))),
+    bannedWords: Array.isArray(out.bannedWords) ? out.bannedWords.map(String) : [],
+    offShelfPhrases: Array.isArray(out.offShelfPhrases) ? out.offShelfPhrases.map(String) : [],
+    customPromptAppend: String(out.customPromptAppend || ""),
+    useExample: toBool(out.useExample, getUseExampleSetting_()),
+    lockShared: toBool(out.lockShared, getSetting("LOCK_SHARED_HEADLINES", false)),
+    lockSharedDescriptions: toBool(out.lockSharedDescriptions, getSetting("LOCK_SHARED_DESCRIPTIONS", false)),
+    angleMinHeadlines: String(out.angleMinHeadlines || getTextSetting_("ANGLE_REQUIRED_MIN_HEADLINES", DEFAULT_ANGLE_MIN_HEADLINES)),
+    angleMinDescriptions: String(out.angleMinDescriptions || getTextSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", DEFAULT_ANGLE_MIN_DESCRIPTIONS)),
+    eventFeedbackAppend: String(out.eventFeedbackAppend || getTextSetting_("EVENT_FEEDBACK_APPEND", DEFAULT_EVENT_FEEDBACK_APPEND)),
+    rowLimit: Math.max(1, Math.min(200, toNum(out.rowLimit, getNumberSetting_("ROW_LIMIT", AD_TOOL_ROW_LIMIT, 1, 200)))),
+    batchDelayMs: Math.max(0, Math.min(10000, toNum(out.batchDelayMs, getNumberSetting_("BATCH_DELAY_MS", DEFAULT_BATCH_DELAY_MS, 0, 10000)))),
+    openaiModel: String(out.openaiModel || getTextSetting_("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)),
+    temperature: Math.max(0, Math.min(1.5, toNum(out.temperature, getNumberSetting_("OPENAI_TEMPERATURE", DEFAULT_OPENAI_TEMPERATURE, 0, 1.5)))),
+    adSheetName: String(out.adSheetName || getTextSetting_("AD_SHEET_NAME", "Ad Copy")),
+    keywordSheetName: String(out.keywordSheetName || getTextSetting_("KEYWORD_SHEET_NAME", "List Of Keywords")),
+    exampleSheetName: String(out.exampleSheetName || getTextSetting_("EXAMPLE_SHEET_NAME", "Ad copy example")),
+    fixedAssetsSheetName: String(out.fixedAssetsSheetName || getTextSetting_("FIXED_ASSETS_SHEET_NAME", DEFAULT_FIXED_ASSETS_SHEET))
+  };
+}
+
+/* ===============================
+GENERATE ADS (FIXED)
+=============================== */
+
+function generateAds() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const keywordSheetName = getTextSetting_("KEYWORD_SHEET_NAME", "List Of Keywords");
+  const adSheetName = getTextSetting_("AD_SHEET_NAME", "Ad Copy");
+  const keywordSheet = ss.getSheetByName(keywordSheetName);
+  const adSheet = ss.getSheetByName(adSheetName);
+  if (!keywordSheet || !adSheet) {
+    SpreadsheetApp.getUi().alert(
+      "Missing sheet",
+      "Check settings: ad sheet '" + adSheetName + "', keyword sheet '" + keywordSheetName + "'.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  const logSheet = getOrCreateAdGenLogSheet_();
+
+  const keywordData = keywordSheet.getDataRange().getValues();
+  const keywordHeaders = keywordData[0];
+  const adData = adSheet.getDataRange().getValues();
+  const lockShared = getSetting("LOCK_SHARED_HEADLINES", false);
+  const lockSharedDescriptions = getSetting("LOCK_SHARED_DESCRIPTIONS", false);
+  const specificHeadlineCount = getNumberSetting_("SPECIFIC_HEADLINE_COUNT", DEFAULT_SPECIFIC_HEADLINE_COUNT, 3, 5);
+  const specificDescriptionCount = getNumberSetting_("SPECIFIC_DESCRIPTION_COUNT", DEFAULT_SPECIFIC_DESCRIPTION_COUNT, 1, 3);
+  const rowLimit = getNumberSetting_("ROW_LIMIT", AD_TOOL_ROW_LIMIT, 1, 200);
+  const batchDelayMs = getNumberSetting_("BATCH_DELAY_MS", DEFAULT_BATCH_DELAY_MS, 0, 10000);
+  const model = getTextSetting_("OPENAI_MODEL", DEFAULT_OPENAI_MODEL);
+  const temperature = getNumberSetting_("OPENAI_TEMPERATURE", DEFAULT_OPENAI_TEMPERATURE, 0, 1.5);
+  const maxRetries = getNumberSetting_("MAX_RETRIES", DEFAULT_MAX_RETRIES, 0, 5);
+  const retryBackoffMs = getNumberSetting_("RETRY_BACKOFF_MS", DEFAULT_RETRY_BACKOFF_MS, 0, 10000);
+  const retryTemperature = getNumberSetting_("RETRY_TEMPERATURE", DEFAULT_RETRY_TEMPERATURE, 0, 1.5);
+  const promptCfg = getPromptConfig_();
+  // #region agent log
+  agentDebugLog_("H10", "ad_tool.txt:generateAds:config", "Generation runtime config", {
+    lockShared: lockShared,
+    lockSharedDescriptions: lockSharedDescriptions,
+    specificHeadlineCount: specificHeadlineCount,
+    specificDescriptionCount: specificDescriptionCount,
+    rowLimit: rowLimit,
+    batchDelayMs: batchDelayMs,
+    model: model,
+    temperature: temperature,
+    maxRetries: maxRetries,
+    retryBackoffMs: retryBackoffMs,
+    retryTemperature: retryTemperature
+  }, "pre-fix");
+  // #endregion
+  const fixedAssets = readFixedAssetsConfig_(ss, getTextSetting_("FIXED_ASSETS_SHEET_NAME", DEFAULT_FIXED_ASSETS_SHEET));
+  let sharedHeadlines = lockShared ? getSharedHeadlinesBaseline_(adData, specificHeadlineCount) : null;
+  let sharedDescriptions = lockSharedDescriptions ? getSharedDescriptionsBaseline_(adData, specificDescriptionCount) : null;
+  if (fixedAssets.warning) {
+    logSheet.appendRow([new Date(), "", "", "FIXED_ASSETS_WARN", fixedAssets.warning]);
+  }
+
+  let processed = 0;
+
+  for (let i = 1; i < adData.length; i++) {
+
+    if (processed >= rowLimit) break;
+
+    const adGroup = (adData[i][1] == null ? "" : String(adData[i][1])).trim();
+    if (!adGroup) {
+      logSheet.appendRow([new Date(), i + 1, "", "SKIP_EMPTY", "Ad group is blank"]);
+      continue;
+    }
+
+    // Only skip if already complete (15 headlines + 4 descriptions)
+    const existingHeadlines = adData[i].slice(3, 18)
+      .filter(v => v && v.toString().trim());
+    const existingDescriptions = adData[i].slice(18, 22)
+      .filter(v => v && v.toString().trim());
+
+    if (existingHeadlines.length >= 15 && existingDescriptions.length >= 4) {
+      logSheet.appendRow([new Date(), i + 1, adGroup, "SKIP_COMPLETE", "Row already has 15 headlines and 4 descriptions"]);
+      continue;
+    }
+
+    const normalizedAdGroup = adGroup.toString().toLowerCase().trim();
+
+    // Attempt 1: exact normalized match
+    let keywordColumn = keywordHeaders.findIndex(h => {
+      if (!h) return false;
+      return h.toString().toLowerCase().trim() === normalizedAdGroup;
+    });
+
+    // Attempt 2: partial match (header contains ad group or vice versa)
+    if (keywordColumn === -1) {
+      keywordColumn = keywordHeaders.findIndex(h => {
+        if (!h) return false;
+        const hNorm = h.toString().toLowerCase().trim();
+        return hNorm.includes(normalizedAdGroup) || normalizedAdGroup.includes(hNorm);
+      });
+    }
+
+    let keywords = [];
+
+    if (keywordColumn !== -1) {
+      for (let r = 1; r < keywordData.length; r++) {
+        const kw = keywordData[r][keywordColumn];
+        if (kw && kw.toString().trim()) keywords.push(kw);
+      }
+    }
+
+    // Fallback: no keywords found — generate from ad group name and log
+    if (!keywords.length) {
+      keywords = [adGroup.toString().trim()];
+      logSheet.appendRow([
+        new Date(),
+        i + 1,
+        adGroup,
+        "NO_KEYWORDS",
+        "Generated from ad group name only. Keyword column not found or empty."
+      ]);
+      Logger.log("Ad Gen Fallback (row " + (i + 1) + "): " + adGroup + " — no keywords, using ad group name");
+    }
+
+    let generated = false;
+    let lastError = "";
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const attemptNo = attempt + 1;
+      const attemptTemp = attempt === 0 ? temperature : retryTemperature;
+      try {
+        const retryNote = attempt > 0
+          ? "\n\nRETRY REQUIREMENT:\nReturn strict JSON with exactly 15 unique headlines and 4 descriptions."
+          : "";
+        const prompt = buildPrompt(adGroup, keywords) + retryNote;
+        const aiResult = callOpenAIJson(prompt, {
+          model: model,
+          temperature: attemptTemp
+        });
+
+        if (!aiResult.headlines || aiResult.headlines.length !== 15) throw new Error("Bad headlines");
+        if (!aiResult.descriptions || aiResult.descriptions.length !== 4) throw new Error("Bad descriptions");
+
+        const finalHeadlines = aiResult.headlines.slice().map(v => String(v == null ? "" : v).trim());
+        const finalDescriptions = aiResult.descriptions.slice().map(v => String(v == null ? "" : v).trim());
+
+        if (lockShared) {
+          if (!sharedHeadlines && hasCompleteSharedHeadlines_(finalHeadlines, specificHeadlineCount)) {
+            sharedHeadlines = finalHeadlines.slice(specificHeadlineCount, 15);
+          }
+          if (sharedHeadlines && sharedHeadlines.length === (15 - specificHeadlineCount)) {
+            for (let h = specificHeadlineCount; h < 15; h++) {
+              finalHeadlines[h] = sharedHeadlines[h - specificHeadlineCount];
+            }
+          }
+        }
+
+        if (lockSharedDescriptions) {
+          if (!sharedDescriptions && hasCompleteSharedDescriptions_(finalDescriptions, specificDescriptionCount)) {
+            sharedDescriptions = finalDescriptions.slice(specificDescriptionCount, 4);
+          }
+          if (sharedDescriptions && sharedDescriptions.length === (4 - specificDescriptionCount)) {
+            for (let d = specificDescriptionCount; d < 4; d++) {
+              finalDescriptions[d] = sharedDescriptions[d - specificDescriptionCount];
+            }
+          }
+        }
+
+        applyAngleAssignmentsByPosition_(finalHeadlines, finalDescriptions, promptCfg, logSheet, i + 1, adGroup);
+        applyFixedAssetsByPosition_(finalHeadlines, finalDescriptions, fixedAssets, logSheet, i + 1, adGroup);
+        ensureUniqueHeadlines_(finalHeadlines, {
+          adGroup: adGroup,
+          keywords: keywords,
+          logSheet: logSheet,
+          rowNumber: i + 1,
+          lockedPositions: Object.keys((fixedAssets && fixedAssets.headlineByPosition) || {}).map(function(k) { return Number(k); })
+        });
+
+        const output = [...finalHeadlines, ...finalDescriptions];
+        adSheet.getRange(i + 1, 4, 1, output.length).setValues([output]);
+
+        processed++;
+        generated = true;
+        logSheet.appendRow([new Date(), i + 1, adGroup, "GENERATED", "Assets generated successfully on attempt " + attemptNo]);
+        Logger.log("Generated row: " + (i + 1) + " | " + adGroup + " | attempt " + attemptNo);
+        Utilities.sleep(batchDelayMs);
+        break;
+      } catch (error) {
+        lastError = String(error);
+        const canRetry = isRecoverableGenerationError_(lastError) && attempt < maxRetries;
+        if (canRetry) {
+          logSheet.appendRow([new Date(), i + 1, adGroup, "RETRY_" + attemptNo, lastError]);
+          Utilities.sleep(retryBackoffMs);
+          continue;
+        }
+        logSheet.appendRow([new Date(), i + 1, adGroup, "ERROR", lastError + " | attempts=" + attemptNo]);
+        Logger.log("Generation failed: " + adGroup + " | " + lastError);
+        break;
+      }
+    }
+    if (!generated) continue;
+  }
+}
+
+function generateAdsOneRowTest() {
+  const prior = getTextSetting_("ROW_LIMIT", String(AD_TOOL_ROW_LIMIT));
+  setSetting("ROW_LIMIT", "1");
+  try {
+    generateAds();
+  } finally {
+    setSetting("ROW_LIMIT", prior);
+  }
+}
+
+function isRecoverableGenerationError_(errorText) {
+  const text = String(errorText || "").toLowerCase();
+  return (
+    text.includes("bad headlines") ||
+    text.includes("bad descriptions") ||
+    text.includes("json") ||
+    text.includes("unexpected token") ||
+    text.includes("unterminated")
+  );
+}
+
+function getOrCreateAdGenLogSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Ad Gen Log");
+  if (!sheet) {
+    sheet = ss.insertSheet("Ad Gen Log");
+    sheet.appendRow(["Time", "Row", "AdGroup", "Reason", "Details"]);
+  }
+  return sheet;
+}
+
+/* ===============================
+PROMPT (UNCHANGED)
+=============================== */
+
+function buildPrompt(adGroup, keywords) {
+  const cfg = getPromptConfig_();
+  const ctaLines = getCtaLinesForMode_(cfg);
+  const headlineSpecificCount = Math.max(3, Math.min(5, Number(cfg.specificHeadlineCount || DEFAULT_SPECIFIC_HEADLINE_COUNT)));
+  const descriptionSpecificCount = Math.max(1, Math.min(3, Number(cfg.specificDescriptionCount || DEFAULT_SPECIFIC_DESCRIPTION_COUNT)));
+  const headlineSharedStart = headlineSpecificCount + 1;
+  const descriptionSharedStart = descriptionSpecificCount + 1;
+  const angleHeadlineRules = formatAngleRulesForPrompt_(cfg.angleMinHeadlines, "headline");
+  const angleDescriptionRules = formatAngleRulesForPrompt_(cfg.angleMinDescriptions, "description");
+  const selectedAngleRules = formatSelectedAnglesForPrompt_(cfg.selectedHeadlineAngleDefs, cfg.selectedDescriptionAngleDefs);
+  const assignedAngleRules = formatAssignedAngleRulesForPrompt_(cfg.angleAssignmentsHeadlines, cfg.angleAssignmentsDescriptions);
+  // #region agent log
+  agentDebugLog_("H11", "ad_tool.txt:buildPrompt", "Prompt config resolved", {
+    brandName: cfg.brandName,
+    website: cfg.brandWebsite,
+    bannedWordsCount: cfg.bannedWords.length,
+    offShelfWordsCount: cfg.offShelfWords.length,
+    hasCustomPromptAppend: !!cfg.customPromptAppend,
+    ctaMode: cfg.ctaMode,
+    specificHeadlineCount: headlineSpecificCount,
+    specificDescriptionCount: descriptionSpecificCount
+  }, "pre-fix");
+  // #endregion
+  return `
+  You are writing Google Responsive Search Ads for an ultra luxury travel brand.
+
+  BRAND
+  ${cfg.brandName}
+  ${cfg.brandWebsite}
+
+  POSITIONING
+  ${cfg.positioning1}
+  ${cfg.positioning2}
+
+  BRAND PRINCIPLES
+  Human curated private travel
+  Custom itineraries built from scratch
+  Exclusive access beyond what travelers can book on their own
+  Quiet luxury tone
+  Personal, insider-led experiences
+
+  CUSTOMER PROMISE
+  ${cfg.customerPromise}
+
+  CALL TO ACTION
+  ${cfg.cta}
+  CTA STYLE MODE
+  ${cfg.ctaMode}
+  PREFERRED CTA PHRASES
+  ${ctaLines.join("\n  ")}
+
+  AD GROUP
+  ${adGroup}
+
+  KEYWORDS
+  ${keywords.join(", ")}
+
+  RULES
+  Write clear, human, high-end copy
+  Do not make the offer sound like an off-the-shelf package or deal
+  The copy must clearly communicate that this is a private guided tour
+  The copy must clearly communicate that itineraries are custom-built for the traveler
+  The copy should reflect exclusive access to places or experiences they cannot easily book on their own
+  Keep the tone refined, personal, and luxurious without sounding generic or overly polished
+  Focus on what is real and specific: private tours, custom itineraries, expert planning, exclusive access, local guides
+  Avoid making driver-guide the main selling point
+  Do not use quotation marks
+  Do not repeat headlines
+  Headlines must be distinct, easy to understand, and useful in Google Ads
+  If a line is too long, shorten naturally by removing filler words, splitting joined words, or using singular/plural variants that preserve meaning
+  Avoid crammed joined words unless they are true place names
+  Headlines maximum 30 characters including spaces
+  Descriptions maximum 90 characters including spaces
+
+  STRUCTURE
+  Headlines 1 to ${headlineSpecificCount} must be specific to the ad group
+  Headlines ${headlineSharedStart} to 15 should be strong universal brand headlines that can work across ad groups
+  Descriptions 1 to ${descriptionSpecificCount} must be specific to the ad group
+  Descriptions ${descriptionSharedStart} to 4 should be strong universal brand descriptions that can work across ad groups
+  ${angleHeadlineRules}
+  ${angleDescriptionRules}
+  ${cfg.eventFeedbackAppend ? `Event/OCCASION FEEDBACK\n${cfg.eventFeedbackAppend}` : ""}
+  IF the event/context is Gemini -> THEN use "celebrate", "commemorate", or "milestone".
+  Shift the tone to be festive and joyous.
+  Example transformation: "Book your Gemini trip" -> "Celebrate your Gemini milestone."
+  ${cfg.socialProofGoogle5StarEnabled ? `SOCIAL PROOF\nUse truthful social-proof phrasing such as: ${cfg.socialProofGoogle5StarText}` : ""}
+  ${selectedAngleRules}
+  ${assignedAngleRules}
+
+  Do NOT use AI or vague words:
+  ${cfg.bannedWords.join(", ")}
+
+  Do NOT use generic or off-the-shelf language:
+  ${cfg.offShelfWords.join(", ")}
+
+  The copy MUST clearly communicate:
+  - this is a private guided tour
+  - itineraries are custom built from scratch
+  - clients get exclusive access they cannot book on their own
+
+  ${cfg.customPromptAppend ? `EXTRA BRAND RULES\n${cfg.customPromptAppend}` : ""}
+
+  Write:
+  15 headlines
+  4 descriptions
+
+  Return ONLY JSON in this EXACT format:
+  {
+    "headlines": [
+      "h1","h2","h3","h4","h5","h6","h7","h8","h9","h10","h11","h12","h13","h14","h15"
+    ],
+    "descriptions": [
+      "d1","d2","d3","d4"
+    ]
+  }
+  `;
+}
+
+/* ===============================
+QA — FIX WEAK ASSETS ONLY
+=============================== */
+
+function qaFixWeakAssets() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const adSheetName = getTextSetting_("AD_SHEET_NAME", "Ad Copy");
+  const keywordSheetName = getTextSetting_("KEYWORD_SHEET_NAME", "List Of Keywords");
+  const adSheet = ss.getSheetByName(adSheetName);
+  const keywordSheet = ss.getSheetByName(keywordSheetName);
+  if (!adSheet || !keywordSheet) {
+    SpreadsheetApp.getUi().alert(
+      "Missing sheet",
+      "Check settings: ad sheet '" + adSheetName + "', keyword sheet '" + keywordSheetName + "'.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+  const logSheet = getOrCreateQaLogSheet_();
+
+  const adData = adSheet.getDataRange().getValues();
+  const keywordData = keywordSheet.getDataRange().getValues();
+  const keywordHeaders = keywordData[0];
+  adSheet.getRange(1, 24).setValue("QA Score");
+
+  const lockShared = getSetting("LOCK_SHARED_HEADLINES", false);
+  const lockSharedDescriptions = getSetting("LOCK_SHARED_DESCRIPTIONS", false);
+  const specificHeadlineCount = getNumberSetting_("SPECIFIC_HEADLINE_COUNT", DEFAULT_SPECIFIC_HEADLINE_COUNT, 3, 5);
+  const specificDescriptionCount = getNumberSetting_("SPECIFIC_DESCRIPTION_COUNT", DEFAULT_SPECIFIC_DESCRIPTION_COUNT, 1, 3);
+  let sharedHeadlines = lockShared ? getSharedHeadlinesBaseline_(adData, specificHeadlineCount) : null;
+  let sharedDescriptions = lockSharedDescriptions ? getSharedDescriptionsBaseline_(adData, specificDescriptionCount) : null;
+
+  for (let i = 1; i < adData.length; i++) {
+
+    const rowNumber = i + 1;
+    const adGroup = (adData[i][1] == null ? "" : String(adData[i][1])).trim();
+    if (!adGroup) continue;
+    // #region agent log
+    agentDebugLog_("H7", "ad_tool.txt:qaFixWeakAssets:rowStart", "QA row processing started", {
+      row: rowNumber,
+      adGroup: String(adGroup),
+      lockShared: lockShared,
+      lockSharedDescriptions: lockSharedDescriptions
+    }, "pre-fix");
+    // #endregion
+
+    const keywords = getKeywordsForAdGroup_(adGroup, keywordHeaders, keywordData);
+
+    let headlines = adData[i].slice(3, 18).map(v => (v == null ? "" : String(v)).trim());
+    let descriptions = adData[i].slice(18, 22).map(v => (v == null ? "" : String(v)).trim());
+    const rowScores = [];
+
+    // QA mode should repair existing assets only, not create new content in blank rows.
+    if (headlines.concat(descriptions).every(v => !v)) continue;
+
+    let allAssets = headlines.concat(descriptions);
+
+    for (let h = 0; h < headlines.length; h++) {
+      if (!headlines[h]) continue;
+      const score = scoreAsset_(headlines[h], "headline", h, adGroup);
+      rowScores.push(score);
+
+      if (lockShared && h >= specificHeadlineCount) {
+        if (!sharedHeadlines && hasCompleteSharedHeadlines_(headlines, specificHeadlineCount)) {
+          sharedHeadlines = headlines.slice(specificHeadlineCount, 15);
+        }
+        if (sharedHeadlines && headlines[h] !== sharedHeadlines[h - specificHeadlineCount]) {
+          adSheet.getRange(rowNumber, 4 + h).setValue(sharedHeadlines[h - specificHeadlineCount]).setBackground("#cfe2f3");
+          headlines[h] = sharedHeadlines[h - specificHeadlineCount];
+        } else {
+          adSheet.getRange(rowNumber, 4 + h).setBackground(null);
+        }
+        continue;
+      }
+
+      const issues = analyzeSingleAsset_(headlines[h], "headline", h, adGroup);
+      if (!issues.length) {
+        adSheet.getRange(rowNumber, 4 + h).setBackground(null);
+        continue;
+      }
+
+      const fixed = fixSingleAsset_(headlines[h], "headline", adGroup, keywords, headlines, descriptions);
+
+      if (!fixed || allAssets.includes(fixed)) continue;
+
+      adSheet.getRange(rowNumber, 4 + h).setValue(fixed).setBackground("#d9ead3");
+
+      logQaChange_(logSheet, rowNumber, adGroup,
+        columnToLetter_(4 + h),
+        "Headline " + (h+1),
+        headlines[h],
+        fixed,
+        issues.join(" | ")
+      );
+    }
+
+    for (let d = 0; d < descriptions.length; d++) {
+      if (!descriptions[d]) continue;
+      rowScores.push(scoreAsset_(descriptions[d], "description", d, adGroup));
+
+      if (lockSharedDescriptions && d >= specificDescriptionCount) {
+        if (!sharedDescriptions && hasCompleteSharedDescriptions_(descriptions, specificDescriptionCount)) {
+          sharedDescriptions = descriptions.slice(specificDescriptionCount, 4);
+        }
+        if (sharedDescriptions && descriptions[d] !== sharedDescriptions[d - specificDescriptionCount]) {
+          adSheet.getRange(rowNumber, 19 + d).setValue(sharedDescriptions[d - specificDescriptionCount]).setBackground("#cfe2f3");
+          descriptions[d] = sharedDescriptions[d - specificDescriptionCount];
+          allAssets[15 + d] = descriptions[d];
+        } else {
+          adSheet.getRange(rowNumber, 19 + d).setBackground(null);
+        }
+        continue;
+      }
+
+      const issues = analyzeSingleAsset_(descriptions[d], "description", d, adGroup);
+      if (!issues.length) {
+        adSheet.getRange(rowNumber, 19 + d).setBackground(null);
+        continue;
+      }
+
+      const fixed = fixSingleAsset_(descriptions[d], "description", adGroup, keywords, headlines, descriptions);
+
+      if (!fixed || allAssets.includes(fixed)) continue;
+
+      adSheet.getRange(rowNumber, 19 + d).setValue(fixed).setBackground("#d9ead3");
+      logQaChange_(logSheet, rowNumber, adGroup,
+        columnToLetter_(19 + d),
+        "Description " + (d+1),
+        descriptions[d],
+        fixed,
+        issues.join(" | ")
+      );
+      descriptions[d] = fixed;
+      allAssets[15 + d] = fixed;
+    }
+
+    if (rowScores.length) {
+      const avgScore = Math.round(rowScores.reduce((a, b) => a + b, 0) / rowScores.length);
+      const scoreCell = adSheet.getRange(rowNumber, 24);
+      scoreCell.setValue(avgScore);
+      if (avgScore < 70) {
+        scoreCell.setBackground("#f4cccc");
+      } else if (avgScore < 85) {
+        scoreCell.setBackground("#fff2cc");
+      } else {
+        scoreCell.setBackground("#d9ead3");
+      }
+    } else {
+      adSheet.getRange(rowNumber, 24).setValue("").setBackground(null);
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("QA complete");
+}
+
+function clearQaFormattingColors() {
+  const adSheetName = getTextSetting_("AD_SHEET_NAME", "Ad Copy");
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(adSheetName);
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("Ad sheet not found: " + adSheetName);
+    return;
+  }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("No rows to clear.");
+    return;
+  }
+  // D:V = headlines/descriptions colors, X = score color.
+  sheet.getRange(2, 4, lastRow - 1, 19).setBackground(null);
+  sheet.getRange(2, 24, lastRow - 1, 1).setBackground(null);
+  SpreadsheetApp.getUi().alert("QA formatting colors cleared.");
+}
+
+/* ===============================
+HELPERS (UNCHANGED)
+=============================== */
+
+function analyzeSingleAsset_(text, type, index, adGroup) {
+  if (!text) return ["empty"];
+
+  const issues = [];
+  const lower = String(text).toLowerCase();
+  const cfg = getPromptConfig_();
+  const banned = cfg.bannedWords || [];
+  const generic = cfg.offShelfWords || [];
+  const vague = ["explore", "discover", "experience", "travel better"];
+
+  if (type === "headline" && text.length > 30) issues.push("too long");
+  if (type === "description" && text.length > 90) issues.push("too long");
+  if (type === "description" && text.length < 60) issues.push("too short");
+
+  banned.forEach(w => {
+    const term = String(w || "").toLowerCase().trim();
+    if (term && lower.includes(term)) issues.push("AI wording");
+  });
+
+  generic.forEach(w => {
+    const term = String(w || "").toLowerCase().trim();
+    if (term && lower.includes(term)) issues.push("generic/off-the-shelf");
+  });
+
+  vague.forEach(w => {
+    if (lower.includes(w)) issues.push("too vague");
+  });
+
+  if (type === "headline" && index < 3) {
+    const words = String(adGroup || "").toLowerCase().split(/\s+/).filter(Boolean);
+    const match = words.some(w => lower.includes(w));
+    if (!match) issues.push("not ad group specific");
+  }
+
+  if (String(text).split(" ").length <= 2) issues.push("too vague");
+
+  return [...new Set(issues)];
+}
+
+function fixSingleAsset_(text, type, adGroup, keywords, headlines, descriptions) {
+  const useExample = getSetting("USE_EXAMPLE_STYLE", getSetting("USE_LIRAN_STYLE", false));
+  const exampleReference = useExample ? getExampleStyleReference_() : "";
+  // #region agent log
+  agentDebugLog_("H8", "ad_tool.txt:fixSingleAsset_", "QA rewrite style context", {
+    adGroup: String(adGroup || ""),
+    type: type,
+    useExample: useExample,
+    hasExampleRef: !!exampleReference
+  }, "pre-fix");
+  // #endregion
+
+  const cfg = getPromptConfig_();
+  const prompt = `
+Rewrite this ${type} for a luxury travel ad.
+
+Original:
+${text}
+
+Ad group:
+${adGroup}
+
+Keywords:
+${(keywords || []).join(", ")}
+
+${useExample ? `
+STYLE REFERENCE (VERY IMPORTANT):
+${exampleReference}
+Do NOT copy directly. Match tone and specificity.
+` : ""}
+
+Rules:
+- Must clearly reflect private guided tours, custom itineraries, or exclusive access
+- Avoid banned words: ${(cfg.bannedWords || []).join(", ")}
+- Avoid generic/off-the-shelf phrasing: ${(cfg.offShelfWords || []).join(", ")}
+- If the event/context is Gemini, use "celebrate", "commemorate", or "milestone"
+- For Gemini context, shift tone to festive and joyous
+- Prefer "Celebrate your Gemini milestone" over neutral booking phrasing
+- Keep tone human, clear, and specific
+- Do not duplicate existing lines
+- ${type === "headline" ? "Max 30 characters including spaces" : "60 to 90 characters including spaces"}
+
+Existing assets:
+${headlines.concat(descriptions).join(" | ")}
+
+Return ONLY the rewritten line.
+`;
+  try {
+    return callOpenAIText(prompt).trim();
+  } catch (e) {
+    return null;
+  }
+}
+
+function callOpenAIText(prompt, options) {
+  const apiKey = getApiKey();
+  const model = options && options.model ? String(options.model) : DEFAULT_OPENAI_MODEL;
+  const temperature = options && options.temperature != null
+    ? Number(options.temperature)
+    : DEFAULT_OPENAI_TEMPERATURE;
+
+  const response = UrlFetchApp.fetch(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + apiKey },
+      payload: JSON.stringify({
+        model: model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: temperature
+      })
+    }
+  );
+  const json = JSON.parse(response.getContentText());
+  const content = json && json.choices && json.choices[0] && json.choices[0].message
+    ? json.choices[0].message.content
+    : "";
+  return String(content || "").replace(/```/g, "").trim();
+}
+
+function getExampleStyleReference_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const exampleSheetName = getTextSetting_("EXAMPLE_SHEET_NAME", "Ad copy example");
+  const exampleSheet = ss.getSheetByName(exampleSheetName);
+  if (!exampleSheet) return "";
+  const values = exampleSheet.getDataRange().getDisplayValues();
+  const lines = [];
+  for (let r = 0; r < values.length; r++) {
+    for (let c = 0; c < values[r].length; c++) {
+      const cell = (values[r][c] || "").toString().trim();
+      if (cell) lines.push(cell);
+    }
+  }
+  return lines.join("\n").slice(0, 4000);
+}
+
+function parseCsvOrLines_(text, fallbackList) {
+  const raw = String(text == null ? "" : text).trim();
+  const src = raw || fallbackList.join(",");
+  return src
+    .split(/[\n,]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function getPromptConfig_() {
+  const angleSheetName = getTextSetting_("ANGLE_LIBRARY_SHEET_NAME", DEFAULT_ANGLE_LIBRARY_SHEET);
+  const angleLibrary = getBrandAngleLibrary_(angleSheetName);
+  const selectedHeadlineAngles = parseCsvIds_(getTextSetting_("SELECTED_HEADLINE_ANGLES", DEFAULT_SELECTED_HEADLINE_ANGLES), 4);
+  const selectedDescriptionAngles = parseCsvIds_(getTextSetting_("SELECTED_DESCRIPTION_ANGLES", DEFAULT_SELECTED_DESCRIPTION_ANGLES), 3);
+  const angleAssignmentsHeadlines = parseAngleAssignmentMap_(getTextSetting_("ANGLE_SLOT_ASSIGNMENTS_HEADLINES", DEFAULT_ANGLE_ASSIGNMENTS_HEADLINES), 15);
+  const angleAssignmentsDescriptions = parseAngleAssignmentMap_(getTextSetting_("ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS", DEFAULT_ANGLE_ASSIGNMENTS_DESCRIPTIONS), 4);
+  return {
+    brandName: getTextSetting_("BRAND_NAME", "Travel by Luxe"),
+    brandWebsite: getTextSetting_("BRAND_WEBSITE", "travelbyluxe.com"),
+    positioning1: getTextSetting_("POSITIONING_LINE_1", "Ultra Luxury Private European Travel"),
+    positioning2: getTextSetting_("POSITIONING_LINE_2", "The Art of the Itinerary"),
+    customerPromise: getTextSetting_("CUSTOMER_PROMISE", "Private guided tours designed around each traveler\nTravel planning completely handled by experts"),
+    cta: getTextSetting_("CTA", "Request a Custom Proposal"),
+    ctaMode: getNormalizedCtaMode_(getTextSetting_("CTA_MODE", DEFAULT_CTA_MODE)),
+    ctaBrandedList: parseCsvOrLines_(getTextSetting_("CTA_BRANDED_LIST", DEFAULT_CTA_BRANDED_LIST), []),
+    ctaExperienceList: parseCsvOrLines_(getTextSetting_("CTA_EXPERIENCE_LIST", DEFAULT_CTA_EXPERIENCE_LIST), []),
+    specificHeadlineCount: getNumberSetting_("SPECIFIC_HEADLINE_COUNT", DEFAULT_SPECIFIC_HEADLINE_COUNT, 3, 5),
+    specificDescriptionCount: getNumberSetting_("SPECIFIC_DESCRIPTION_COUNT", DEFAULT_SPECIFIC_DESCRIPTION_COUNT, 1, 3),
+    angleMinHeadlines: parseAngleMinMap_(getTextSetting_("ANGLE_REQUIRED_MIN_HEADLINES", DEFAULT_ANGLE_MIN_HEADLINES)),
+    angleMinDescriptions: parseAngleMinMap_(getTextSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", DEFAULT_ANGLE_MIN_DESCRIPTIONS)),
+    angleLibrarySheetName: angleSheetName,
+    selectedHeadlineAngles: selectedHeadlineAngles,
+    selectedDescriptionAngles: selectedDescriptionAngles,
+    selectedHeadlineAngleDefs: getAngleDefsByIds_(angleLibrary, selectedHeadlineAngles),
+    selectedDescriptionAngleDefs: getAngleDefsByIds_(angleLibrary, selectedDescriptionAngles),
+    angleAssignmentsHeadlines: angleAssignmentsHeadlines,
+    angleAssignmentsDescriptions: angleAssignmentsDescriptions,
+    socialProofGoogle5StarEnabled: getSetting("SOCIAL_PROOF_GOOGLE_5STAR_ENABLED", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_ENABLED === "true"),
+    socialProofGoogle5StarText: getTextSetting_("SOCIAL_PROOF_GOOGLE_5STAR_TEXT", DEFAULT_SOCIAL_PROOF_GOOGLE_5STAR_TEXT),
+    brandQaMode: getEnumSetting_("BRAND_QA_MODE", DEFAULT_BRAND_QA_MODE, ["audit_only", "audit_and_fix"]),
+    eventFeedbackAppend: getTextSetting_("EVENT_FEEDBACK_APPEND", DEFAULT_EVENT_FEEDBACK_APPEND),
+    bannedWords: parseCsvOrLines_(getTextSetting_("BANNED_WORDS", ""), parseCsvOrLines_(DEFAULT_BANNED_WORDS, [])),
+    offShelfWords: parseCsvOrLines_(getTextSetting_("OFF_SHELF_WORDS", ""), parseCsvOrLines_(DEFAULT_OFF_SHELF_WORDS, [])),
+    customPromptAppend: getTextSetting_("CUSTOM_PROMPT_APPEND", "")
+  };
+}
+
+function callOpenAIJson(prompt, options) {
+
+  const apiKey = getApiKey();
+  const model = options && options.model ? String(options.model) : DEFAULT_OPENAI_MODEL;
+  const temperature = options && options.temperature != null
+    ? Number(options.temperature)
+    : DEFAULT_OPENAI_TEMPERATURE;
+
+  const response = UrlFetchApp.fetch(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + apiKey },
+      payload: JSON.stringify({
+        model: model,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt }],
+        temperature: temperature
+      })
+    }
+  ); // ✅ THIS WAS MISSING
+
+  const json = JSON.parse(response.getContentText());
+
+  let content = json.choices[0].message.content;
+
+  content = content.replace(/```json/g,"").replace(/```/g,"").trim();
+
+  return JSON.parse(content);
+}
+
+
+function getKeywordsForAdGroup_(adGroup, headers, data) {
+
+  const normalizedAdGroup = adGroup.toString().toLowerCase().trim();
+
+  const col = headers.findIndex(h => {
+    if (!h) return false;
+    return h.toString().toLowerCase().trim() === normalizedAdGroup;
+  });
+
+  if (col === -1) return [];
+  return data.slice(1).map(r => r[col]).filter(Boolean);
+}
+
+function getBaselineHeadlines_() {
+  const adSheetName = getTextSetting_("AD_SHEET_NAME", "Ad Copy");
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(adSheetName);
+  if (!sheet) return [];
+  return sheet.getRange(2, 4, 1, 15).getValues()[0];
+}
+
+function getSharedHeadlinesBaseline_(adData, specificHeadlineCount) {
+  const start = Math.max(3, Math.min(5, Number(specificHeadlineCount || DEFAULT_SPECIFIC_HEADLINE_COUNT)));
+  for (let i = 1; i < adData.length; i++) {
+    const headlines = adData[i].slice(3, 18).map(v => (v == null ? "" : String(v)).trim());
+    const shared = headlines.slice(start, 15);
+    if (shared.every(Boolean)) return shared;
+  }
+  return null;
+}
+
+function hasCompleteSharedHeadlines_(headlines, specificHeadlineCount) {
+  const start = Math.max(3, Math.min(5, Number(specificHeadlineCount || DEFAULT_SPECIFIC_HEADLINE_COUNT)));
+  const shared = headlines.slice(start, 15).map(v => (v == null ? "" : String(v)).trim());
+  return shared.length === (15 - start) && shared.every(Boolean);
+}
+
+function getSharedDescriptionsBaseline_(adData, specificDescriptionCount) {
+  const start = Math.max(1, Math.min(3, Number(specificDescriptionCount || DEFAULT_SPECIFIC_DESCRIPTION_COUNT)));
+  for (let i = 1; i < adData.length; i++) {
+    const descriptions = adData[i].slice(18, 22).map(v => (v == null ? "" : String(v)).trim());
+    const shared = descriptions.slice(start, 4);
+    if (shared.every(Boolean)) return shared;
+  }
+  return null;
+}
+
+function hasCompleteSharedDescriptions_(descriptions, specificDescriptionCount) {
+  const start = Math.max(1, Math.min(3, Number(specificDescriptionCount || DEFAULT_SPECIFIC_DESCRIPTION_COUNT)));
+  const shared = descriptions.slice(start, 4).map(v => (v == null ? "" : String(v)).trim());
+  return shared.length === (4 - start) && shared.every(Boolean);
+}
+
+function readFixedAssetsConfig_(ss, sheetName) {
+  const name = String(sheetName || DEFAULT_FIXED_ASSETS_SHEET);
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return { headlineByPosition: {}, descriptionByPosition: {}, warning: "Fixed assets sheet not found: " + name };
+  }
+  const values = sheet.getDataRange().getValues();
+  const headers = (values[0] || []).map(v => String(v == null ? "" : v).trim().toLowerCase());
+  const idxEnabled = findHeaderIndex_(headers, ["enabled", "active", "apply"]);
+  const idxType = findHeaderIndex_(headers, ["type", "asset type"]);
+  const idxPosition = findHeaderIndex_(headers, ["position", "slot", "fixed position"]);
+  const idxText = findHeaderIndex_(headers, ["text", "asset", "copy"]);
+  if (idxType < 0 || idxPosition < 0 || idxText < 0) {
+    return { headlineByPosition: {}, descriptionByPosition: {}, warning: "Fixed assets sheet missing required headers (type, position, text)." };
+  }
+
+  const headlineByPosition = {};
+  const descriptionByPosition = {};
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const enabled = idxEnabled < 0 ? true : toBoolCell_(row[idxEnabled]);
+    if (!enabled) continue;
+    const typeRaw = String(row[idxType] == null ? "" : row[idxType]).toLowerCase().trim();
+    const text = String(row[idxText] == null ? "" : row[idxText]).trim();
+    const position = Number(row[idxPosition]);
+    if (!text || !isFinite(position)) continue;
+    if (typeRaw === "headline" && position >= 1 && position <= 15 && text.length <= 30) {
+      headlineByPosition[position] = text;
+    } else if (typeRaw === "description" && position >= 1 && position <= 4 && text.length <= 90) {
+      descriptionByPosition[position] = text;
+    }
+  }
+  return { headlineByPosition: headlineByPosition, descriptionByPosition: descriptionByPosition, warning: "" };
+}
+
+function applyFixedAssetsByPosition_(headlines, descriptions, fixedAssets, logSheet, rowNumber, adGroup) {
+  if (!fixedAssets) return;
+  const hMap = fixedAssets.headlineByPosition || {};
+  const dMap = fixedAssets.descriptionByPosition || {};
+  Object.keys(hMap).forEach(function(k) {
+    const pos = Number(k);
+    const idx = pos - 1;
+    if (idx >= 0 && idx < headlines.length) {
+      const prev = headlines[idx];
+      headlines[idx] = hMap[k];
+      if (prev !== headlines[idx]) {
+        logSheet.appendRow([new Date(), rowNumber, adGroup, "FIXED_HEADLINE_" + pos, "Applied fixed headline"]);
+      }
+    }
+  });
+  Object.keys(dMap).forEach(function(k) {
+    const pos = Number(k);
+    const idx = pos - 1;
+    if (idx >= 0 && idx < descriptions.length) {
+      const prev = descriptions[idx];
+      descriptions[idx] = dMap[k];
+      if (prev !== descriptions[idx]) {
+        logSheet.appendRow([new Date(), rowNumber, adGroup, "FIXED_DESCRIPTION_" + pos, "Applied fixed description"]);
+      }
+    }
+  });
+}
+
+function findHeaderIndex_(headers, aliases) {
+  for (let i = 0; i < aliases.length; i++) {
+    const idx = headers.indexOf(String(aliases[i] || "").toLowerCase());
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function toBoolCell_(v) {
+  if (v === true) return true;
+  if (v === false) return false;
+  const s = String(v == null ? "" : v).toLowerCase().trim();
+  if (!s) return true;
+  if (s === "0" || s === "false" || s === "no" || s === "n" || s === "off") return false;
+  return true;
+}
+
+function getNormalizedCtaMode_(raw) {
+  const mode = String(raw == null ? DEFAULT_CTA_MODE : raw).toLowerCase().trim();
+  if (mode === "branded" || mode === "experience" || mode === "balanced") return mode;
+  return DEFAULT_CTA_MODE;
+}
+
+function getCtaLinesForMode_(cfg) {
+  const branded = (cfg.ctaBrandedList || []).slice(0, 8);
+  const experience = (cfg.ctaExperienceList || []).slice(0, 8);
+  if (cfg.ctaMode === "branded") return branded.length ? branded : experience;
+  if (cfg.ctaMode === "experience") return experience.length ? experience : branded;
+  return branded.concat(experience).filter(Boolean).slice(0, 10);
+}
+
+function parseAngleMinMap_(raw) {
+  const out = {};
+  const parts = String(raw == null ? "" : raw).split(/[\n,]/);
+  for (let i = 0; i < parts.length; i++) {
+    const token = String(parts[i] || "").trim();
+    if (!token) continue;
+    const m = token.match(/^([a-z0-9 _-]+)\s*:\s*(\d+)$/i);
+    if (!m) continue;
+    const key = String(m[1] || "").trim().toLowerCase();
+    const count = Math.max(0, Math.min(4, Number(m[2])));
+    if (!key) continue;
+    if (!count) continue;
+    out[key] = count;
+  }
+  return out;
+}
+
+function formatAngleRulesForPrompt_(angleMap, assetType) {
+  const type = assetType === "description" ? "descriptions" : "headlines";
+  const pairs = Object.keys(angleMap || {});
+  if (!pairs.length) return "";
+  return pairs.map(function(k) {
+    return "Include at least " + angleMap[k] + " " + type + " that reflect angle '" + k + "'.";
+  }).join("\n  ");
+}
+
+function parseCsvIds_(raw, maxCount) {
+  const seen = {};
+  const out = [];
+  const parts = String(raw == null ? "" : raw).split(/[\n,]/);
+  for (let i = 0; i < parts.length; i++) {
+    const id = String(parts[i] || "").toLowerCase().trim();
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    out.push(id);
+    if (typeof maxCount === "number" && out.length >= maxCount) break;
+  }
+  return out;
+}
+
+function qasLimitCsvList_(raw, maxCount) {
+  return parseCsvIds_(raw, maxCount).join(",");
+}
+
+function parseAngleAssignmentMap_(raw, maxSlot) {
+  const out = {};
+  const entries = String(raw == null ? "" : raw).split(/[\n,]/);
+  for (let i = 0; i < entries.length; i++) {
+    const token = String(entries[i] || "").trim();
+    if (!token) continue;
+    const m = token.match(/^([a-z0-9 _-]+)\s*:\s*(\d+)$/i);
+    if (!m) continue;
+    const id = String(m[1] || "").toLowerCase().trim();
+    const slot = Number(m[2]);
+    if (!id || !isFinite(slot)) continue;
+    if (slot < 1 || slot > maxSlot) continue;
+    out[id] = slot;
+  }
+  return out;
+}
+
+function getBrandAngleLibrary_(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(String(sheetName || DEFAULT_ANGLE_LIBRARY_SHEET));
+  if (!sheet) return [];
+  const values = sheet.getDataRange().getValues();
+  const headers = (values[0] || []).map(function(v) { return String(v == null ? "" : v).toLowerCase().trim(); });
+  const idxEnabled = findHeaderIndex_(headers, ["enabled", "active", "apply"]);
+  const idxId = findHeaderIndex_(headers, ["angleid", "angle id", "id"]);
+  const idxName = findHeaderIndex_(headers, ["anglename", "angle name", "name"]);
+  const idxType = findHeaderIndex_(headers, ["type"]);
+  const idxFocus = findHeaderIndex_(headers, ["focus"]);
+  const idxExamples = findHeaderIndex_(headers, ["examples", "example"]);
+  if (idxId < 0) return [];
+
+  const out = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const enabled = idxEnabled < 0 ? true : toBoolCell_(row[idxEnabled]);
+    if (!enabled) continue;
+    const id = String(row[idxId] == null ? "" : row[idxId]).toLowerCase().trim();
+    if (!id) continue;
+    out.push({
+      id: id,
+      name: idxName >= 0 ? String(row[idxName] == null ? "" : row[idxName]).trim() : id,
+      type: idxType >= 0 ? String(row[idxType] == null ? "" : row[idxType]).toLowerCase().trim() : "both",
+      focus: idxFocus >= 0 ? String(row[idxFocus] == null ? "" : row[idxFocus]).trim() : "",
+      examples: idxExamples >= 0 ? String(row[idxExamples] == null ? "" : row[idxExamples]).trim() : ""
+    });
+  }
+  return out;
+}
+
+function getAngleDefsByIds_(library, ids) {
+  const byId = {};
+  (library || []).forEach(function(a) { byId[a.id] = a; });
+  const out = [];
+  (ids || []).forEach(function(id) {
+    if (byId[id]) out.push(byId[id]);
+  });
+  return out;
+}
+
+function formatSelectedAnglesForPrompt_(headlineAngles, descriptionAngles) {
+  const h = (headlineAngles || []).map(function(a) {
+    return "- " + a.id + " | " + a.name + " | focus: " + a.focus + (a.examples ? " | examples: " + a.examples : "");
+  }).join("\n  ");
+  const d = (descriptionAngles || []).map(function(a) {
+    return "- " + a.id + " | " + a.name + " | focus: " + a.focus + (a.examples ? " | examples: " + a.examples : "");
+  }).join("\n  ");
+  if (!h && !d) return "";
+  return [
+    "SELECTED ANGLES",
+    h ? "Headlines:\n  " + h : "",
+    d ? "Descriptions:\n  " + d : ""
+  ].filter(Boolean).join("\n  ");
+}
+
+function formatAssignedAngleRulesForPrompt_(headlineAssignments, descriptionAssignments) {
+  const h = Object.keys(headlineAssignments || {}).map(function(id) {
+    return "Use angle '" + id + "' in Headline " + headlineAssignments[id] + ".";
+  });
+  const d = Object.keys(descriptionAssignments || {}).map(function(id) {
+    return "Use angle '" + id + "' in Description " + descriptionAssignments[id] + ".";
+  });
+  return h.concat(d).join("\n  ");
+}
+
+function applyAngleAssignmentsByPosition_(headlines, descriptions, cfg, logSheet, rowNumber, adGroup) {
+  const library = getBrandAngleLibrary_(cfg.angleLibrarySheetName);
+  const byId = {};
+  library.forEach(function(a) { byId[a.id] = a; });
+
+  const hMap = cfg.angleAssignmentsHeadlines || {};
+  Object.keys(hMap).forEach(function(id) {
+    const def = byId[id];
+    const slot = Number(hMap[id]);
+    const idx = slot - 1;
+    if (!def || idx < 0 || idx >= headlines.length) return;
+    const candidate = qasFirstExampleLine_(def.examples);
+    if (!candidate) return;
+    const text = candidate.length > 30 ? candidate.slice(0, 30).trim() : candidate;
+    const prev = headlines[idx];
+    headlines[idx] = text;
+    if (prev !== text) {
+      logSheet.appendRow([new Date(), rowNumber, adGroup, "ANGLE_HEADLINE_" + slot, "Applied angle '" + id + "'"]);
+    }
+  });
+
+  const dMap = cfg.angleAssignmentsDescriptions || {};
+  Object.keys(dMap).forEach(function(id) {
+    const def = byId[id];
+    const slot = Number(dMap[id]);
+    const idx = slot - 1;
+    if (!def || idx < 0 || idx >= descriptions.length) return;
+    const candidate = qasFirstExampleLine_(def.examples);
+    if (!candidate) return;
+    const text = candidate.length > 90 ? candidate.slice(0, 90).trim() : candidate;
+    const prev = descriptions[idx];
+    descriptions[idx] = text;
+    if (prev !== text) {
+      logSheet.appendRow([new Date(), rowNumber, adGroup, "ANGLE_DESCRIPTION_" + slot, "Applied angle '" + id + "'"]);
+    }
+  });
+}
+
+function qasFirstExampleLine_(examplesText) {
+  const lines = String(examplesText == null ? "" : examplesText).split(/[\n|]/).map(function(v) { return String(v || "").trim(); }).filter(Boolean);
+  return lines.length ? lines[0] : "";
+}
+
+function getAnglePreviewText_(sheetName) {
+  const rows = getBrandAngleLibrary_(sheetName);
+  if (!rows.length) return "No angle rows found. Use Prompt Extractor (Extract + Apply) to populate Brand Angles.";
+  return rows.slice(0, 20).map(function(a) {
+    return a.id + " | " + a.name + " | " + (a.focus || "") + (a.examples ? " | " + a.examples : "");
+  }).join("\n");
+}
+
+function getNormalizedBrandQaMode_(raw) {
+  const mode = String(raw == null ? DEFAULT_BRAND_QA_MODE : raw).toLowerCase().trim();
+  return mode === "audit_and_fix" ? "audit_and_fix" : "audit_only";
+}
+
+function normalizeHeadlineKey_(text) {
+  return String(text == null ? "" : text).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function ensureUniqueHeadlines_(headlines, opts) {
+  const used = {};
+  const locked = {};
+  (opts && opts.lockedPositions || []).forEach(function(p) { locked[Number(p)] = true; });
+  for (let i = 0; i < headlines.length; i++) {
+    const current = String(headlines[i] == null ? "" : headlines[i]).trim();
+    if (!current) continue;
+    const key = normalizeHeadlineKey_(current);
+    if (!used[key]) {
+      used[key] = i + 1;
+      continue;
+    }
+    const pos = i + 1;
+    if (locked[pos]) {
+      if (opts && opts.logSheet) {
+        opts.logSheet.appendRow([new Date(), opts.rowNumber || "", opts.adGroup || "", "DUPLICATE_LOCKED", "Duplicate locked headline at H" + pos + ": " + current]);
+      }
+      continue;
+    }
+    let replacement = buildDeterministicUniqueHeadline_(current, opts && opts.adGroup, used);
+    if (!replacement) {
+      replacement = rewriteDuplicateHeadlineAi_(current, opts && opts.adGroup, opts && opts.keywords, Object.keys(used));
+    }
+    replacement = String(replacement || "").trim();
+    const repKey = normalizeHeadlineKey_(replacement);
+    if (!replacement || used[repKey] || replacement.length > 30) {
+      if (opts && opts.logSheet) {
+        opts.logSheet.appendRow([new Date(), opts.rowNumber || "", opts.adGroup || "", "DUPLICATE_UNRESOLVED", "Could not dedupe headline at H" + pos + ": " + current]);
+      }
+      continue;
+    }
+    headlines[i] = replacement;
+    used[repKey] = pos;
+    if (opts && opts.logSheet) {
+      opts.logSheet.appendRow([new Date(), opts.rowNumber || "", opts.adGroup || "", "DUPLICATE_FIXED", "H" + pos + ": " + current + " -> " + replacement]);
+    }
+  }
+}
+
+function buildDeterministicUniqueHeadline_(headline, adGroup, usedMap) {
+  const base = String(headline == null ? "" : headline).trim();
+  if (!base) return "";
+  const tokens = String(adGroup == null ? "" : adGroup)
+    .split(/\s+/)
+    .map(function(v) { return String(v || "").trim(); })
+    .filter(function(v) { return v.length > 2; });
+  for (let i = 0; i < tokens.length; i++) {
+    const cand = (base + " " + tokens[i]).replace(/\s+/g, " ").trim();
+    if (cand.length > 30) continue;
+    if (!usedMap[normalizeHeadlineKey_(cand)]) return cand;
+  }
+  const suffixes = ["Private", "Custom", "Luxury", "Expert"];
+  for (let j = 0; j < suffixes.length; j++) {
+    const cand = (base + " " + suffixes[j]).replace(/\s+/g, " ").trim();
+    if (cand.length > 30) continue;
+    if (!usedMap[normalizeHeadlineKey_(cand)]) return cand;
+  }
+  return "";
+}
+
+function rewriteDuplicateHeadlineAi_(headline, adGroup, keywords, usedKeys) {
+  try {
+    const prompt = `
+Rewrite this headline to be unique in the same ad while preserving meaning.
+
+Headline:
+${headline}
+
+Ad group:
+${adGroup}
+
+Keywords:
+${(keywords || []).join(", ")}
+
+Already used headline keys (avoid semantic repeats):
+${(usedKeys || []).join(" | ")}
+
+Rules:
+- Max 30 characters
+- Must be clearly different from existing used headlines
+- Return one line only
+`;
+    const out = callOpenAIText(prompt, { temperature: 0.2 });
+    return String(out || "").split(/\r?\n/).map(function(v) { return String(v || "").trim(); }).filter(Boolean)[0] || "";
+  } catch (_e) {
+    return "";
+  }
+}
+
+function upsertBrandAnglesSheet_(ss, angles, sheetName) {
+  const name = String(sheetName || DEFAULT_ANGLE_LIBRARY_SHEET);
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  const header = ["Enabled", "AngleId", "AngleName", "Type", "Focus", "Examples"];
+  sheet.clearContents();
+  sheet.appendRow(header);
+  const rows = (angles || []).map(function(a) {
+    return [
+      true,
+      String(a && a.id || ""),
+      String(a && a.name || ""),
+      String(a && a.type || "both"),
+      String(a && a.focus || ""),
+      Array.isArray(a && a.examples) ? a.examples.join(" | ") : String(a && a.examples || "")
+    ];
+  }).filter(function(r) { return !!r[1]; });
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, header.length).setValues(rows);
+  }
+}
+
+function ensureOptionBankSheets_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  getOrCreateBrandOptionBankSheet_(ss);
+  getOrCreateCampaignOptionPicksSheet_(ss);
+}
+
+function generateBrandOptionBank() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureOptionBankSheets_();
+  const cfg = getPromptConfig_();
+  const prompt = buildOptionBankPrompt_(cfg);
+  const model = getTextSetting_("OPENAI_MODEL", DEFAULT_OPENAI_MODEL);
+  const result = callOpenAIJson(prompt, { model: model, temperature: 0.3 });
+  const normalized = normalizeOptionBankExtract_(result);
+  writeBrandOptionBank_(ss, normalized, cfg.brandName);
+  SpreadsheetApp.getUi().alert("Option Bank generated: " + normalized.headlines.length + " headlines, " + normalized.descriptions.length + " descriptions.");
+}
+
+function buildOptionBankPrompt_(cfg) {
+  return `
+Create reusable ad copy options for a luxury travel brand.
+
+Brand:
+${cfg.brandName}
+${cfg.brandWebsite}
+
+Positioning:
+${cfg.positioning1}
+${cfg.positioning2}
+
+Customer promise:
+${cfg.customerPromise}
+
+Selected headline angles:
+${(cfg.selectedHeadlineAngleDefs || []).map(function(a) { return a.id + " | " + a.name + " | " + a.focus + " | " + a.examples; }).join("\n")}
+
+Selected description angles:
+${(cfg.selectedDescriptionAngleDefs || []).map(function(a) { return a.id + " | " + a.name + " | " + a.focus + " | " + a.examples; }).join("\n")}
+
+CTA mode:
+${cfg.ctaMode}
+CTA options:
+${getCtaLinesForMode_(cfg).join("\n")}
+
+Rules:
+- Headline max 30 chars
+- Description max 90 chars
+- Avoid banned words: ${(cfg.bannedWords || []).join(", ")}
+- Avoid off-shelf phrasing: ${(cfg.offShelfWords || []).join(", ")}
+- No exact duplicate lines
+- Keep each line standalone and campaign-reusable
+
+Return ONLY JSON:
+{
+  "headlines": [
+    {"text":"...", "theme":"...", "angleId":"...", "source":"ai", "score":80}
+  ],
+  "descriptions": [
+    {"text":"...", "theme":"...", "angleId":"...", "source":"ai", "score":80}
+  ]
+}
+
+Produce exactly 20 headlines and exactly 20 descriptions.
+`;
+}
+
+function normalizeOptionBankExtract_(obj) {
+  const out = obj || {};
+  const norm = function(arr, maxLen) {
+    const src = Array.isArray(arr) ? arr : [];
+    const rows = [];
+    const seen = {};
+    for (let i = 0; i < src.length; i++) {
+      const item = src[i] || {};
+      const text = String(item.text == null ? "" : item.text).replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      const sliced = text.length > maxLen ? text.slice(0, maxLen).trim() : text;
+      const key = sliced.toLowerCase();
+      if (!key || seen[key]) continue;
+      seen[key] = true;
+      rows.push({
+        text: sliced,
+        theme: String(item.theme == null ? "" : item.theme).trim(),
+        angleId: String(item.angleId == null ? "" : item.angleId).toLowerCase().trim(),
+        source: String(item.source == null ? "ai" : item.source).trim(),
+        score: isFinite(Number(item.score)) ? Number(item.score) : 0
+      });
+      if (rows.length >= 20) break;
+    }
+    return rows;
+  };
+  const headlines = norm(out.headlines, 30);
+  const descriptions = norm(out.descriptions, 90);
+  while (headlines.length < 20) {
+    headlines.push({ text: "", theme: "", angleId: "", source: "ai", score: 0 });
+  }
+  while (descriptions.length < 20) {
+    descriptions.push({ text: "", theme: "", angleId: "", source: "ai", score: 0 });
+  }
+  return {
+    headlines: headlines.slice(0, 20).filter(function(r) { return !!r.text; }),
+    descriptions: descriptions.slice(0, 20).filter(function(r) { return !!r.text; })
+  };
+}
+
+function writeBrandOptionBank_(ss, bank, brandTag) {
+  const sheet = getOrCreateBrandOptionBankSheet_(ss);
+  const rows = [];
+  (bank.headlines || []).forEach(function(item, idx) {
+    rows.push([
+      true,
+      "headline",
+      buildOptionId_("headline", idx),
+      item.text,
+      item.theme || "",
+      item.angleId || "",
+      brandTag || "",
+      item.source || "ai",
+      item.score || 0
+    ]);
+  });
+  (bank.descriptions || []).forEach(function(item, idx) {
+    rows.push([
+      true,
+      "description",
+      buildOptionId_("description", idx),
+      item.text,
+      item.theme || "",
+      item.angleId || "",
+      brandTag || "",
+      item.source || "ai",
+      item.score || 0
+    ]);
+  });
+  sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 9).clearContent();
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, 9).setValues(rows);
+  }
+}
+
+function getOrCreateBrandOptionBankSheet_(ss) {
+  const sheetName = getTextSetting_("OPTION_BANK_SHEET_NAME", DEFAULT_OPTION_BANK_SHEET);
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) sheet = ss.insertSheet(sheetName);
+  const header = ["Enabled", "AssetType", "OptionId", "Text", "Theme", "AngleId", "BrandTag", "Source", "Score"];
+  const first = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  const same = header.every(function(h, i) { return String(first[i] || "").trim() === h; });
+  if (!same) {
+    sheet.clearContents();
+    sheet.appendRow(header);
+  }
+  return sheet;
+}
+
+function getOrCreateCampaignOptionPicksSheet_(ss) {
+  const sheetName = getTextSetting_("CAMPAIGN_PICKS_SHEET_NAME", DEFAULT_CAMPAIGN_PICKS_SHEET);
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) sheet = ss.insertSheet(sheetName);
+  const header = ["Enabled", "AdGroup", "AssetType", "OptionId", "TargetPosition", "Priority", "Notes"];
+  const first = sheet.getRange(1, 1, 1, header.length).getValues()[0];
+  const same = header.every(function(h, i) { return String(first[i] || "").trim() === h; });
+  if (!same) {
+    sheet.clearContents();
+    sheet.appendRow(header);
+  }
+  return sheet;
+}
+
+function readBrandOptionBankOptions_(ss) {
+  const sheet = getOrCreateBrandOptionBankSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  const options = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const enabled = toBoolCell_(row[0]);
+    if (!enabled) continue;
+    const assetType = String(row[1] == null ? "" : row[1]).toLowerCase().trim();
+    const optionId = String(row[2] == null ? "" : row[2]).trim();
+    const text = String(row[3] == null ? "" : row[3]).trim();
+    const theme = String(row[4] == null ? "" : row[4]).trim();
+    const angleId = String(row[5] == null ? "" : row[5]).toLowerCase().trim();
+    const brandTag = String(row[6] == null ? "" : row[6]).trim();
+    const source = String(row[7] == null ? "" : row[7]).trim();
+    const score = Number(row[8]);
+    if (!optionId || !text) continue;
+    if (assetType !== "headline" && assetType !== "description") continue;
+    options.push({
+      assetType: assetType,
+      optionId: optionId,
+      text: text,
+      theme: theme,
+      angleId: angleId,
+      brandTag: brandTag,
+      source: source,
+      score: isFinite(score) ? score : 0
+    });
+  }
+  return options;
+}
+
+function readCampaignOptionPicks_(ss) {
+  const sheet = getOrCreateCampaignOptionPicksSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  const picks = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const enabled = toBoolCell_(row[0]);
+    if (!enabled) continue;
+    const adGroup = String(row[1] == null ? "" : row[1]).trim();
+    const assetType = String(row[2] == null ? "" : row[2]).toLowerCase().trim();
+    const optionId = String(row[3] == null ? "" : row[3]).trim();
+    const targetPosition = Number(row[4]);
+    const priority = Number(row[5]);
+    const notes = String(row[6] == null ? "" : row[6]).trim();
+    if (!adGroup || !optionId) continue;
+    if (assetType !== "headline" && assetType !== "description") continue;
+    picks.push({
+      adGroup: adGroup,
+      adGroupKey: normalizeAdGroupKey_(adGroup),
+      assetType: assetType,
+      optionId: optionId,
+      targetPosition: isFinite(targetPosition) ? targetPosition : 0,
+      priority: isFinite(priority) ? priority : 9999,
+      notes: notes
+    });
+  }
+  return picks.sort(function(a, b) { return a.priority - b.priority; });
+}
+
+function applyCampaignOptionPicks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureOptionBankSheets_();
+  const adSheetName = getTextSetting_("AD_SHEET_NAME", "Ad Copy");
+  const adSheet = ss.getSheetByName(adSheetName);
+  if (!adSheet) {
+    SpreadsheetApp.getUi().alert("Ad sheet not found: " + adSheetName);
+    return;
+  }
+
+  const options = readBrandOptionBankOptions_(ss);
+  const picks = readCampaignOptionPicks_(ss);
+  const optionsById = {};
+  options.forEach(function(o) { optionsById[o.optionId] = o; });
+  const fixedAssets = readFixedAssetsConfig_(ss, getTextSetting_("FIXED_ASSETS_SHEET_NAME", DEFAULT_FIXED_ASSETS_SHEET));
+  const logSheet = getOrCreateAdGenLogSheet_();
+
+  const data = adSheet.getDataRange().getValues();
+  let applied = 0;
+  let skipped = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = i + 1;
+    const adGroup = String(data[i][1] == null ? "" : data[i][1]).trim();
+    if (!adGroup) continue;
+    const key = normalizeAdGroupKey_(adGroup);
+    const rowPicks = picks.filter(function(p) { return p.adGroupKey === key; });
+    if (!rowPicks.length) continue;
+
+    const headlines = data[i].slice(3, 18).map(function(v) { return String(v == null ? "" : v).trim(); });
+    const descriptions = data[i].slice(18, 22).map(function(v) { return String(v == null ? "" : v).trim(); });
+
+    rowPicks.forEach(function(pick) {
+      const option = optionsById[pick.optionId];
+      if (!option) {
+        skipped++;
+        logSheet.appendRow([new Date(), row, adGroup, "OPTION_SKIP", "Missing optionId: " + pick.optionId]);
+        return;
+      }
+      if (option.assetType !== pick.assetType) {
+        skipped++;
+        logSheet.appendRow([new Date(), row, adGroup, "OPTION_SKIP", "Type mismatch for " + pick.optionId]);
+        return;
+      }
+      const pos = Number(pick.targetPosition);
+      if (pick.assetType === "headline") {
+        if (!(pos >= 1 && pos <= 15)) {
+          skipped++;
+          logSheet.appendRow([new Date(), row, adGroup, "OPTION_SKIP", "Invalid headline position for " + pick.optionId]);
+          return;
+        }
+        headlines[pos - 1] = String(option.text || "").slice(0, 30).trim();
+        applied++;
+      } else {
+        if (!(pos >= 1 && pos <= 4)) {
+          skipped++;
+          logSheet.appendRow([new Date(), row, adGroup, "OPTION_SKIP", "Invalid description position for " + pick.optionId]);
+          return;
+        }
+        descriptions[pos - 1] = String(option.text || "").slice(0, 90).trim();
+        applied++;
+      }
+    });
+
+    applyFixedAssetsByPosition_(headlines, descriptions, fixedAssets, logSheet, row, adGroup);
+    const output = headlines.concat(descriptions);
+    adSheet.getRange(row, 4, 1, output.length).setValues([output]);
+  }
+
+  SpreadsheetApp.getUi().alert("Campaign option picks applied. Updated: " + applied + " | Skipped: " + skipped);
+}
+
+function normalizeAdGroupKey_(text) {
+  return String(text == null ? "" : text).toLowerCase().trim();
+}
+
+function buildOptionId_(assetType, idx) {
+  const prefix = assetType === "description" ? "DOPT" : "HOPT";
+  const num = String(idx + 1);
+  return prefix + (num.length < 2 ? "0" + num : num);
+}
+
+function getBlockedTermsByType_(type) {
+  const cfg = getPromptConfig_();
+  const banned = (cfg.bannedWords || []).map(function(v) { return String(v || "").toLowerCase().trim(); }).filter(Boolean);
+  const offShelf = (cfg.offShelfWords || []).map(function(v) { return String(v || "").toLowerCase().trim(); }).filter(Boolean);
+  return type === "banned" ? banned : offShelf;
+}
+
+function containsAnyTerm_(text, terms) {
+  const lower = String(text || "").toLowerCase();
+  for (let i = 0; i < terms.length; i++) {
+    if (terms[i] && lower.includes(terms[i])) return true;
+  }
+  return false;
+}
+
+function getOrCreateQaLogSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("QA Log");
+
+  if (!sheet) {
+    sheet = ss.insertSheet("QA Log");
+    sheet.appendRow(["Time","Row","AdGroup","Column","Asset","Old","New","Reason"]);
+  }
+  return sheet;
+}
+
+function logQaChange_(sheet,row,group,col,asset,oldVal,newVal,reason){
+  sheet.appendRow([new Date(),row,group,col,asset,oldVal,newVal,reason]);
+}
+
+function columnToLetter_(column){
+  let temp="",letter="";
+  while(column>0){
+    temp=(column-1)%26;
+    letter=String.fromCharCode(temp+65)+letter;
+    column=(column-temp-1)/26;
+  }
+  return letter;
+}
+
+function scoreAsset_(text, type, index, adGroup) {
+
+  let score = 100;
+  const lower = (text || "").toLowerCase();
+  const banned = getBlockedTermsByType_("banned");
+  const generic = getBlockedTermsByType_("offShelf");
+
+  if (type === "headline" && text.length > 30) score -= 20;
+  if (type === "description" && text.length > 90) score -= 20;
+  if (type === "description" && text.length < 60) score -= 15;
+
+  banned.forEach(w => lower.includes(w) && (score -= 25));
+  generic.forEach(w => lower.includes(w) && (score -= 20));
+
+  if (text.split(" ").length <= 2) score -= 15;
+
+  if (type === "headline" && index < 3) {
+    const words = adGroup.toLowerCase().split(" ");
+    const match = words.some(w => lower.includes(w));
+    if (!match) score -= 15;
+  }
+
+  if (
+    !lower.includes("private") &&
+    !lower.includes("custom") &&
+    !lower.includes("access")
+  ) {
+    score -= 20;
+  }
+
+  return Math.max(score, 0);
+}

@@ -1,0 +1,1089 @@
+/* ===============================
+UNIVERSAL AD TOOLS (RECOVERY BASELINE)
+=============================== */
+
+const DEFAULTS = {
+  AD_TYPE_TABS: "Search,pmax",
+  AD_TYPE_SHEET_MAP: "search:Search,pmax:pmax",
+  AD_SHEET_NAME: "Search",
+  KEYWORD_SHEET_NAME: "List Of Keywords",
+  AUDIENCE_SHEET_NAME: "List Of Audiences",
+  LANDING_PAGE_SHEET_NAME: "Landing Pages",
+  USE_KEYWORDS: "false",
+  USE_AUDIENCES: "false",
+  USE_LANDING_PAGE_CONTEXT: "false",
+  RUN_OVERRIDE_MODE: "false",
+  BRAND_NAME: "",
+  BRAND_WEBSITE: "",
+  POSITIONING_LINE_1: "",
+  POSITIONING_LINE_2: "",
+  CUSTOMER_PROMISE: "",
+  CTA: "",
+  CTA_MODE: "balanced",
+  CTA_BRANDED_LIST: "",
+  CTA_EXPERIENCE_LIST: "",
+  ANGLE_REQUIRED_MIN_HEADLINES: "",
+  ANGLE_REQUIRED_MIN_DESCRIPTIONS: "",
+  ANGLE_LIBRARY_SHEET_NAME: "Brand Angles",
+  SELECTED_HEADLINE_ANGLES: "",
+  SELECTED_DESCRIPTION_ANGLES: "",
+  ANGLE_SLOT_ASSIGNMENTS_HEADLINES: "",
+  ANGLE_SLOT_ASSIGNMENTS_DESCRIPTIONS: "",
+  BANNED_WORDS: "",
+  OFF_SHELF_WORDS: "",
+  CUSTOM_PROMPT_APPEND: "",
+  EVENT_FEEDBACK_APPEND: "",
+  LOCK_SHARED_HEADLINES: "false",
+  LOCK_SHARED_DESCRIPTIONS: "false",
+  OPENAI_MODEL: "gpt-4o-mini",
+  OPENAI_TEMPERATURE: "0.4",
+  ROW_LIMIT: "5",
+  BATCH_DELAY_MS: "1200",
+  STOP_RUN_REQUESTED: "false"
+};
+const HARD_BLOCKED_TERMS = ["join", "quora", "blog", "blogs", "competitors"];
+
+function getSpreadsheetUiSafe_() {
+  try {
+    return SpreadsheetApp.getUi();
+  } catch (_e) {
+    return null;
+  }
+}
+
+function getSetting_(key, fallback) {
+  const val = PropertiesService.getScriptProperties().getProperty(key);
+  return val === null || val === "" ? fallback : String(val);
+}
+
+function getBoolSetting_(key, fallback) {
+  return String(getSetting_(key, fallback ? "true" : "false")).toLowerCase() === "true";
+}
+
+function setSetting_(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, String(value == null ? "" : value));
+}
+
+function htmlEscape_(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function injectMissingDynamicSettings_(opts) {
+  const options = opts || {};
+  const props = PropertiesService.getScriptProperties();
+  const keys = Object.keys(DEFAULTS);
+  const injected = [];
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (props.getProperty(k) === null) {
+      props.setProperty(k, DEFAULTS[k]);
+      injected.push(k);
+    }
+  }
+  if (!options.silent) {
+    const ui = getSpreadsheetUiSafe_();
+    if (ui) ui.alert(injected.length ? ("Injected missing settings: " + injected.length) : "No missing settings found.");
+  }
+  return { injectedCount: injected.length, injectedKeys: injected };
+}
+
+function resetDynamicSettings() {
+  const keys = Object.keys(DEFAULTS);
+  for (let i = 0; i < keys.length; i++) setSetting_(keys[i], DEFAULTS[keys[i]]);
+  const ui = getSpreadsheetUiSafe_();
+  if (ui) ui.alert("Dynamic settings reset to defaults.");
+}
+
+function runOptionalModuleFn_(fnName, moduleFileHint) {
+  const fn = this && this[fnName];
+  if (typeof fn === "function") return fn();
+  const ui = getSpreadsheetUiSafe_();
+  if (ui) {
+    ui.alert(
+      "Function not available: " + fnName + "\n" +
+      "Please make sure " + moduleFileHint + " is added and saved in this Apps Script project."
+    );
+  }
+}
+
+function onOpen() {
+  injectMissingDynamicSettings_({ silent: true });
+  const ui = getSpreadsheetUiSafe_();
+  if (!ui) return;
+  ui.createMenu("Universal Ad Tools")
+    .addItem("Open Tools Panel", "showToolsPanel")
+    .addItem("Universal Settings", "showSettingsMenu")
+    .addItem("Prompt Extractor / Manifest Apply", "showPromptExtractor")
+    .addSeparator()
+    .addItem("Generate Ads", "generateAds")
+    .addItem("Generate Ads (1 Row Test)", "generateAdsOneRowTest")
+    .addItem("Stop Current Runs", "requestStopAllRuns")
+    .addItem("Clear Stop Flag", "clearStopAllRuns")
+    .addItem("Brand Manifest Summary", "showBrandManifestSummaryPopup")
+    .addItem("Show Current Settings", "showCurrentSettings")
+    .addItem("Inject Missing Settings", "injectMissingDynamicSettingsFromMenu")
+    .addItem("Reset Dynamic Settings", "resetDynamicSettings")
+    .addSeparator()
+    .addItem("QA Length Audit - Over Limits", "menuQaLengthAudit")
+    .addItem("QA Length Fix - Auto Shorten", "menuQaLengthFixAllTooLong")
+    .addItem("QA Standalone - Run Fix", "menuQaStandaloneRunFix")
+    .addItem("QA Standalone - Brand Audit", "menuQaStandaloneBrandAudit")
+    .addItem("QA Standalone - Brand Fix", "menuQaStandaloneBrandFix")
+    .addToUi();
+}
+
+function onInstall() {
+  onOpen();
+}
+
+function installMenuNow() {
+  onOpen();
+}
+
+function injectMissingDynamicSettingsFromMenu() {
+  injectMissingDynamicSettings_({ silent: false });
+}
+
+function requestStopAllRuns() {
+  setSetting_("STOP_RUN_REQUESTED", "true");
+  const ui = getSpreadsheetUiSafe_();
+  if (ui) ui.alert("Stop requested. In-progress runs will stop at the next safe checkpoint.");
+}
+
+function clearStopAllRuns() {
+  setSetting_("STOP_RUN_REQUESTED", "false");
+  const ui = getSpreadsheetUiSafe_();
+  if (ui) ui.alert("Stop flag cleared.");
+}
+
+function isStopRequested_() {
+  return getBoolSetting_("STOP_RUN_REQUESTED", false);
+}
+
+function showToolsPanel() {
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;padding:12px;">' +
+    '<h3 style="margin:0 0 10px 0;">Universal Ad Tools</h3>' +
+    '<div style="display:grid;grid-template-columns:1fr;gap:8px;">' +
+    '<button onclick="run(\'showSettingsMenu\')">Open Settings</button>' +
+    '<button onclick="run(\'showPromptExtractor\')">Prompt Extractor / Manifest Apply</button>' +
+    '<button onclick="run(\'generateAds\')">Generate Ads</button>' +
+    '<button onclick="run(\'generateAdsOneRowTest\')">Generate 1 Row</button>' +
+    '<button onclick="run(\'qaLengthAuditRun\')">QA Length Audit</button>' +
+    '<button onclick="run(\'qaLengthFixAllTooLong\')">QA Length Fix</button>' +
+    '<button onclick="run(\'menuQaStandaloneBrandAudit\')">Brand Audit</button>' +
+    '<button onclick="run(\'menuQaStandaloneBrandFix\')">Brand Fix</button>' +
+    '</div>' +
+    '<div id="status" style="margin-top:10px;color:#0b8043;"></div>' +
+    '<script>' +
+    'function run(fn){document.getElementById("status").textContent="Running "+fn+"...";' +
+    'google.script.run.withSuccessHandler(function(){document.getElementById("status").textContent="Done: "+fn;})' +
+    '.withFailureHandler(function(err){document.getElementById("status").style.color="#b31412";document.getElementById("status").textContent="Failed: "+err.message;})[fn]();}' +
+    '</script>' +
+    '</div>'
+  ).setTitle("Universal Tools Panel");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function getSettingsForSidebar_() {
+  injectMissingDynamicSettings_({ silent: true });
+  const apiKey = getSetting_("OPENAI_API_KEY", "");
+  return {
+    brandName: getSetting_("BRAND_NAME", DEFAULTS.BRAND_NAME),
+    brandWebsite: getSetting_("BRAND_WEBSITE", DEFAULTS.BRAND_WEBSITE),
+    positioning1: getSetting_("POSITIONING_LINE_1", DEFAULTS.POSITIONING_LINE_1),
+    positioning2: getSetting_("POSITIONING_LINE_2", DEFAULTS.POSITIONING_LINE_2),
+    customerPromise: getSetting_("CUSTOMER_PROMISE", DEFAULTS.CUSTOMER_PROMISE),
+    cta: getSetting_("CTA", DEFAULTS.CTA),
+    ctaMode: getSetting_("CTA_MODE", DEFAULTS.CTA_MODE),
+    ctaBrandedList: getSetting_("CTA_BRANDED_LIST", DEFAULTS.CTA_BRANDED_LIST),
+    ctaExperienceList: getSetting_("CTA_EXPERIENCE_LIST", DEFAULTS.CTA_EXPERIENCE_LIST),
+    angleMinHeadlines: getSetting_("ANGLE_REQUIRED_MIN_HEADLINES", DEFAULTS.ANGLE_REQUIRED_MIN_HEADLINES),
+    angleMinDescriptions: getSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", DEFAULTS.ANGLE_REQUIRED_MIN_DESCRIPTIONS),
+    bannedWords: getSetting_("BANNED_WORDS", DEFAULTS.BANNED_WORDS),
+    offShelfPhrases: getSetting_("OFF_SHELF_WORDS", DEFAULTS.OFF_SHELF_WORDS),
+    customPromptAppend: getSetting_("CUSTOM_PROMPT_APPEND", DEFAULTS.CUSTOM_PROMPT_APPEND),
+    eventFeedbackAppend: getSetting_("EVENT_FEEDBACK_APPEND", DEFAULTS.EVENT_FEEDBACK_APPEND),
+    adTypeTabs: getSetting_("AD_TYPE_TABS", DEFAULTS.AD_TYPE_TABS),
+    adTypeSheetMap: getSetting_("AD_TYPE_SHEET_MAP", DEFAULTS.AD_TYPE_SHEET_MAP),
+    adSheetName: getSetting_("AD_SHEET_NAME", DEFAULTS.AD_SHEET_NAME),
+    keywordSheetName: getSetting_("KEYWORD_SHEET_NAME", DEFAULTS.KEYWORD_SHEET_NAME),
+    audienceSheetName: getSetting_("AUDIENCE_SHEET_NAME", DEFAULTS.AUDIENCE_SHEET_NAME),
+    landingPageSheetName: getSetting_("LANDING_PAGE_SHEET_NAME", DEFAULTS.LANDING_PAGE_SHEET_NAME),
+    openaiApiKeyConfigured: !!apiKey,
+    runOverrideMode: getBoolSetting_("RUN_OVERRIDE_MODE", DEFAULTS.RUN_OVERRIDE_MODE === "true"),
+    useKeywords: getBoolSetting_("USE_KEYWORDS", DEFAULTS.USE_KEYWORDS === "true"),
+    useAudiences: getBoolSetting_("USE_AUDIENCES", DEFAULTS.USE_AUDIENCES === "true"),
+    useLandingPageContext: getBoolSetting_("USE_LANDING_PAGE_CONTEXT", DEFAULTS.USE_LANDING_PAGE_CONTEXT === "true")
+  };
+}
+
+function showSettingsMenu() {
+  const s = getSettingsForSidebar_();
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family:Arial,sans-serif;padding:12px;">
+      <h3 style="margin:0 0 10px 0;">Universal Ad Settings</h3>
+      <div style="font-weight:bold;margin-top:6px;">API</div>
+      <div style="font-size:12px;color:#555;margin-top:4px;">OpenAI key saved: ${s.openaiApiKeyConfigured ? "Yes" : "No"}</div>
+      <label style="display:block;margin:8px 0;">
+        OpenAI API key (leave blank to keep existing)
+        <input id="openaiApiKey" type="password" value="" style="width:100%;box-sizing:border-box;" autocomplete="off">
+      </label>
+      <label style="display:block;margin:8px 0;">Brand name<input id="brandName" value="${htmlEscape_(s.brandName)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Brand website<input id="brandWebsite" value="${htmlEscape_(s.brandWebsite)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Positioning line 1<input id="positioning1" value="${htmlEscape_(s.positioning1)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Positioning line 2<input id="positioning2" value="${htmlEscape_(s.positioning2)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Customer promise<textarea id="customerPromise" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(s.customerPromise)}</textarea></label>
+      <label style="display:block;margin:8px 0;">Primary CTA<input id="cta" value="${htmlEscape_(s.cta)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">CTA mode
+        <select id="ctaMode" style="width:100%;box-sizing:border-box;">
+          <option value="balanced" ${s.ctaMode === "balanced" ? "selected" : ""}>balanced</option>
+          <option value="branded" ${s.ctaMode === "branded" ? "selected" : ""}>branded</option>
+          <option value="experience" ${s.ctaMode === "experience" ? "selected" : ""}>experience</option>
+        </select>
+      </label>
+      <label style="display:block;margin:8px 0;">Branded CTA list (one per line)<textarea id="ctaBrandedList" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(s.ctaBrandedList)}</textarea></label>
+      <label style="display:block;margin:8px 0;">Experience CTA list (one per line)<textarea id="ctaExperienceList" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(s.ctaExperienceList)}</textarea></label>
+      <label style="display:block;margin:8px 0;">Angle minimums for headlines<input id="angleMinHeadlines" value="${htmlEscape_(s.angleMinHeadlines)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Angle minimums for descriptions<input id="angleMinDescriptions" value="${htmlEscape_(s.angleMinDescriptions)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Banned words/phrases<textarea id="bannedWords" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(s.bannedWords)}</textarea></label>
+      <label style="display:block;margin:8px 0;">Off-shelf phrases<textarea id="offShelfPhrases" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(s.offShelfPhrases)}</textarea></label>
+      <label style="display:block;margin:8px 0;">Custom prompt rules<textarea id="customPromptAppend" rows="3" style="width:100%;box-sizing:border-box;">${htmlEscape_(s.customPromptAppend)}</textarea></label>
+      <label style="display:block;margin:8px 0;">Ad type tabs<input id="adTypeTabs" value="${htmlEscape_(s.adTypeTabs)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Ad type sheet map<input id="adTypeSheetMap" value="${htmlEscape_(s.adTypeSheetMap)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;">Ad sheet name<input id="adSheetName" value="${htmlEscape_(s.adSheetName)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;"><input type="checkbox" id="useKeywords" ${s.useKeywords ? "checked" : ""}> Use keywords</label>
+      <label style="display:block;margin:8px 0;">Keyword sheet name<input id="keywordSheetName" value="${htmlEscape_(s.keywordSheetName)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;"><input type="checkbox" id="useAudiences" ${s.useAudiences ? "checked" : ""}> Use audiences</label>
+      <label style="display:block;margin:8px 0;">Audience sheet name<input id="audienceSheetName" value="${htmlEscape_(s.audienceSheetName)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;"><input type="checkbox" id="useLandingPageContext" ${s.useLandingPageContext ? "checked" : ""}> Use landing-page context</label>
+      <label style="display:block;margin:8px 0;">Landing pages sheet name<input id="landingPageSheetName" value="${htmlEscape_(s.landingPageSheetName)}" style="width:100%;box-sizing:border-box;"></label>
+      <label style="display:block;margin:8px 0;"><input type="checkbox" id="runOverrideMode" ${s.runOverrideMode ? "checked" : ""}> Override mode (force less-conservative runs)</label>
+      <button onclick="saveSettings()">Save</button>
+      <div id="status" style="margin-top:10px;color:#0b8043;"></div>
+    </div>
+    <script>
+      function el(id) { return document.getElementById(id); }
+      function setStatus(color, text) {
+        var node = el("status");
+        if (!node) return;
+        node.style.color = color;
+        node.textContent = text;
+      }
+      window.saveSettings = function() {
+        const payload = {
+          openaiApiKey: el("openaiApiKey").value,
+          brandName: el("brandName").value,
+          brandWebsite: el("brandWebsite").value,
+          positioning1: el("positioning1").value,
+          positioning2: el("positioning2").value,
+          customerPromise: el("customerPromise").value,
+          cta: el("cta").value,
+          ctaMode: el("ctaMode").value,
+          ctaBrandedList: el("ctaBrandedList").value,
+          ctaExperienceList: el("ctaExperienceList").value,
+          angleMinHeadlines: el("angleMinHeadlines").value,
+          angleMinDescriptions: el("angleMinDescriptions").value,
+          bannedWords: el("bannedWords").value,
+          offShelfPhrases: el("offShelfPhrases").value,
+          customPromptAppend: el("customPromptAppend").value,
+          adTypeTabs: el("adTypeTabs").value,
+          adTypeSheetMap: el("adTypeSheetMap").value,
+          adSheetName: el("adSheetName").value,
+          useKeywords: el("useKeywords").checked,
+          keywordSheetName: el("keywordSheetName").value,
+          useAudiences: el("useAudiences").checked,
+          audienceSheetName: el("audienceSheetName").value,
+          useLandingPageContext: el("useLandingPageContext").checked,
+          landingPageSheetName: el("landingPageSheetName").value,
+          runOverrideMode: el("runOverrideMode").checked
+        };
+        setStatus("#1a73e8", "Saving...");
+        google.script.run.withSuccessHandler(function(msg){
+            setStatus("#0b8043", msg || "Settings saved");
+          })
+          .withFailureHandler(function(err){
+            setStatus("#b31412", "Save failed: " + (err && err.message ? err.message : err));
+          })
+          .saveSettingsFromSidebar(payload);
+      };
+    </script>
+  `).setTitle("Universal Ad Settings");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function saveSettingsFromSidebar(payload) {
+  payload = payload || {};
+  if (Object.prototype.hasOwnProperty.call(payload, "openaiApiKey")) {
+    const key = String(payload.openaiApiKey || "").trim();
+    if (key) setSetting_("OPENAI_API_KEY", key);
+  }
+  const map = {
+    brandName: "BRAND_NAME",
+    brandWebsite: "BRAND_WEBSITE",
+    positioning1: "POSITIONING_LINE_1",
+    positioning2: "POSITIONING_LINE_2",
+    customerPromise: "CUSTOMER_PROMISE",
+    cta: "CTA",
+    ctaMode: "CTA_MODE",
+    ctaBrandedList: "CTA_BRANDED_LIST",
+    ctaExperienceList: "CTA_EXPERIENCE_LIST",
+    angleMinHeadlines: "ANGLE_REQUIRED_MIN_HEADLINES",
+    angleMinDescriptions: "ANGLE_REQUIRED_MIN_DESCRIPTIONS",
+    bannedWords: "BANNED_WORDS",
+    offShelfPhrases: "OFF_SHELF_WORDS",
+    customPromptAppend: "CUSTOM_PROMPT_APPEND",
+    adTypeTabs: "AD_TYPE_TABS",
+    adTypeSheetMap: "AD_TYPE_SHEET_MAP",
+    adSheetName: "AD_SHEET_NAME",
+    keywordSheetName: "KEYWORD_SHEET_NAME",
+    audienceSheetName: "AUDIENCE_SHEET_NAME",
+    landingPageSheetName: "LANDING_PAGE_SHEET_NAME"
+  };
+  const keys = Object.keys(map);
+  for (let i = 0; i < keys.length; i++) {
+    const p = keys[i];
+    if (Object.prototype.hasOwnProperty.call(payload, p)) setSetting_(map[p], payload[p]);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "useKeywords")) setSetting_("USE_KEYWORDS", !!payload.useKeywords);
+  if (Object.prototype.hasOwnProperty.call(payload, "useAudiences")) setSetting_("USE_AUDIENCES", !!payload.useAudiences);
+  if (Object.prototype.hasOwnProperty.call(payload, "useLandingPageContext")) setSetting_("USE_LANDING_PAGE_CONTEXT", !!payload.useLandingPageContext);
+  if (Object.prototype.hasOwnProperty.call(payload, "runOverrideMode")) setSetting_("RUN_OVERRIDE_MODE", !!payload.runOverrideMode);
+  return "Settings saved";
+}
+
+function showCurrentSettings() {
+  const s = getSettingsForSidebar_();
+  const msg = [
+    "Brand: " + s.brandName,
+    "Website: " + s.brandWebsite,
+    "CTA mode: " + s.ctaMode,
+    "Ad type tabs: " + s.adTypeTabs,
+    "Ad type map: " + s.adTypeSheetMap,
+    "Use keywords: " + s.useKeywords,
+    "Use audiences: " + s.useAudiences,
+    "Use landing page context: " + s.useLandingPageContext,
+    "Override mode: " + s.runOverrideMode,
+    "Banned words: " + s.bannedWords,
+    "Off-shelf: " + s.offShelfPhrases
+  ].join("\n");
+  SpreadsheetApp.getUi().alert("Current Settings", msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function buildBrandManifestSummaryFromSettings_() {
+  const s = getSettingsForSidebar_();
+  return [
+    "Brand Manifest Summary",
+    "",
+    "Brand: " + s.brandName,
+    "Website: " + s.brandWebsite,
+    "Positioning 1: " + s.positioning1,
+    "Positioning 2: " + s.positioning2,
+    "Customer Promise: " + s.customerPromise,
+    "CTA: " + s.cta,
+    "CTA Mode: " + s.ctaMode,
+    "Branded CTA List: " + s.ctaBrandedList,
+    "Experience CTA List: " + s.ctaExperienceList,
+    "Angle Min Headlines: " + s.angleMinHeadlines,
+    "Angle Min Descriptions: " + s.angleMinDescriptions,
+    "Banned Words: " + s.bannedWords,
+    "Off-Shelf Phrases: " + s.offShelfPhrases,
+    "Event Feedback: " + s.eventFeedbackAppend,
+    "Custom Prompt Append: " + s.customPromptAppend,
+    "",
+    "Ad Type Tabs: " + s.adTypeTabs,
+    "Ad Type Sheet Map: " + s.adTypeSheetMap,
+    "Ad Sheet: " + s.adSheetName,
+    "Use Keywords: " + s.useKeywords,
+    "Keyword Sheet: " + s.keywordSheetName,
+    "Use Audiences: " + s.useAudiences,
+    "Audience Sheet: " + s.audienceSheetName,
+    "Use Landing Page Context: " + s.useLandingPageContext,
+    "Landing Page Sheet: " + s.landingPageSheetName
+    ,
+    "Override Mode: " + s.runOverrideMode
+  ].join("\n");
+}
+
+function showBrandManifestSummaryPopup(summaryText) {
+  const summary = String(summaryText || buildBrandManifestSummaryFromSettings_());
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;padding:12px;">' +
+    '<h3 style="margin:0 0 10px 0;">Brand Manifest Summary</h3>' +
+    '<textarea style="width:100%;height:420px;box-sizing:border-box;">' +
+    htmlEscape_(summary) +
+    "</textarea>" +
+    "</div>"
+  ).setWidth(720).setHeight(520);
+  SpreadsheetApp.getUi().showModalDialog(html, "Brand Manifest Summary");
+}
+
+function normalizeManifestList_(value) {
+  if (Array.isArray(value)) return value.map(function(v) { return String(v == null ? "" : v).trim(); }).filter(Boolean).join(",");
+  return String(value == null ? "" : value).split(/[\n,]/).map(function(v) { return String(v || "").trim(); }).filter(Boolean).join(",");
+}
+
+function applyBrandManifestObject_(manifest) {
+  const m = manifest || {};
+  const pick = function(key, fallback) { return m[key] == null ? fallback : m[key]; };
+  setSetting_("BRAND_NAME", pick("brandName", getSetting_("BRAND_NAME", DEFAULTS.BRAND_NAME)));
+  setSetting_("BRAND_WEBSITE", pick("brandWebsite", getSetting_("BRAND_WEBSITE", DEFAULTS.BRAND_WEBSITE)));
+  setSetting_("POSITIONING_LINE_1", pick("positioning1", getSetting_("POSITIONING_LINE_1", DEFAULTS.POSITIONING_LINE_1)));
+  setSetting_("POSITIONING_LINE_2", pick("positioning2", getSetting_("POSITIONING_LINE_2", DEFAULTS.POSITIONING_LINE_2)));
+  setSetting_("CUSTOMER_PROMISE", pick("customerPromise", getSetting_("CUSTOMER_PROMISE", DEFAULTS.CUSTOMER_PROMISE)));
+  setSetting_("CTA", pick("cta", getSetting_("CTA", DEFAULTS.CTA)));
+  setSetting_("CTA_MODE", pick("ctaMode", getSetting_("CTA_MODE", DEFAULTS.CTA_MODE)));
+  setSetting_("CTA_BRANDED_LIST", pick("ctaBrandedList", getSetting_("CTA_BRANDED_LIST", DEFAULTS.CTA_BRANDED_LIST)));
+  setSetting_("CTA_EXPERIENCE_LIST", pick("ctaExperienceList", getSetting_("CTA_EXPERIENCE_LIST", DEFAULTS.CTA_EXPERIENCE_LIST)));
+  setSetting_("ANGLE_REQUIRED_MIN_HEADLINES", pick("angleMinHeadlines", getSetting_("ANGLE_REQUIRED_MIN_HEADLINES", DEFAULTS.ANGLE_REQUIRED_MIN_HEADLINES)));
+  setSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", pick("angleMinDescriptions", getSetting_("ANGLE_REQUIRED_MIN_DESCRIPTIONS", DEFAULTS.ANGLE_REQUIRED_MIN_DESCRIPTIONS)));
+  setSetting_("BANNED_WORDS", normalizeManifestList_(pick("bannedWords", getSetting_("BANNED_WORDS", DEFAULTS.BANNED_WORDS))));
+  setSetting_("OFF_SHELF_WORDS", normalizeManifestList_(pick("offShelfPhrases", getSetting_("OFF_SHELF_WORDS", DEFAULTS.OFF_SHELF_WORDS))));
+  setSetting_("CUSTOM_PROMPT_APPEND", pick("customPromptAppend", getSetting_("CUSTOM_PROMPT_APPEND", DEFAULTS.CUSTOM_PROMPT_APPEND)));
+  setSetting_("AD_TYPE_TABS", pick("adTypeTabs", getSetting_("AD_TYPE_TABS", DEFAULTS.AD_TYPE_TABS)));
+  setSetting_("AD_TYPE_SHEET_MAP", pick("adTypeSheetMap", getSetting_("AD_TYPE_SHEET_MAP", DEFAULTS.AD_TYPE_SHEET_MAP)));
+  setSetting_("AD_SHEET_NAME", pick("adSheetName", getSetting_("AD_SHEET_NAME", DEFAULTS.AD_SHEET_NAME)));
+  setSetting_("KEYWORD_SHEET_NAME", pick("keywordSheetName", getSetting_("KEYWORD_SHEET_NAME", DEFAULTS.KEYWORD_SHEET_NAME)));
+  setSetting_("AUDIENCE_SHEET_NAME", pick("audienceSheetName", getSetting_("AUDIENCE_SHEET_NAME", DEFAULTS.AUDIENCE_SHEET_NAME)));
+  setSetting_("LANDING_PAGE_SHEET_NAME", pick("landingPageSheetName", getSetting_("LANDING_PAGE_SHEET_NAME", DEFAULTS.LANDING_PAGE_SHEET_NAME)));
+  setSetting_("USE_KEYWORDS", !!pick("useKeywords", getBoolSetting_("USE_KEYWORDS", false)));
+  setSetting_("USE_AUDIENCES", !!pick("useAudiences", getBoolSetting_("USE_AUDIENCES", false)));
+  setSetting_("USE_LANDING_PAGE_CONTEXT", !!pick("useLandingPageContext", getBoolSetting_("USE_LANDING_PAGE_CONTEXT", false)));
+  setSetting_("RUN_OVERRIDE_MODE", !!pick("runOverrideMode", getBoolSetting_("RUN_OVERRIDE_MODE", false)));
+}
+
+function showPromptExtractor() {
+  const html = HtmlService.createHtmlOutput(`
+    <div style="font-family:Arial,sans-serif;padding:12px;">
+      <h3 style="margin:0 0 10px 0;">Prompt Extractor / Manifest Apply</h3>
+      <div style="font-size:12px;color:#555;">Extract settings from brand text, or apply manifest JSON if you already have one.</div>
+      <label style="display:block;margin-top:8px;">Website URL (optional)<input id="websiteUrl" style="width:100%;box-sizing:border-box;" placeholder="https://example.com"></label>
+      <label style="display:block;margin-top:8px;">Google Doc URL (optional)<input id="docUrl" style="width:100%;box-sizing:border-box;" placeholder="https://docs.google.com/document/d/..."></label>
+      <label style="display:block;margin-top:8px;">Brand text (optional)<textarea id="sourceText" rows="8" style="width:100%;box-sizing:border-box;"></textarea></label>
+      <label style="display:block;margin-top:8px;">Manifest JSON (optional)<textarea id="manifest" rows="10" style="width:100%;box-sizing:border-box;"></textarea></label>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button onclick="extractOnly()">Extract</button>
+        <button onclick="extractApply()">Extract + Apply</button>
+        <button onclick="applyManifest()">Apply Manifest</button>
+      </div>
+      <div id="status" style="margin-top:10px;color:#0b8043;"></div>
+      <textarea id="result" rows="10" style="margin-top:8px;width:100%;box-sizing:border-box;"></textarea>
+    </div>
+    <script>
+      function el(id) { return document.getElementById(id); }
+      function setStatus(color, text) {
+        var node = el("status");
+        if (!node) return;
+        node.style.color = color;
+        node.textContent = text;
+      }
+      window.applyManifest = function() {
+        var manifestText = (el("manifest").value || "").trim();
+        if (!manifestText) {
+          manifestText = (el("result").value || "").trim();
+        }
+        if (!manifestText) {
+          setStatus("#b31412", "No manifest JSON found. Use Extract + Apply if you do not have JSON.");
+          return;
+        }
+        setStatus("#1a73e8", "Applying...");
+        google.script.run.withSuccessHandler(function(msg) {
+          setStatus("#0b8043", msg || "Manifest applied.");
+        }).withFailureHandler(function(err) {
+          setStatus("#b31412", "Failed: " + (err && err.message ? err.message : err));
+        }).applyBrandManifestFromJson(manifestText);
+      };
+      function runExtract(apply) {
+        setStatus("#1a73e8", "Extracting...");
+        google.script.run.withSuccessHandler(function(res) {
+          setStatus("#0b8043", (res && res.message) || "Done");
+          var resultNode = el("result");
+          if (resultNode) resultNode.value = JSON.stringify((res && res.extracted) || {}, null, 2);
+          if (res && res.manifestJson) el("manifest").value = res.manifestJson;
+        }).withFailureHandler(function(err) {
+          setStatus("#b31412", "Failed: " + (err && err.message ? err.message : err));
+        }).extractPromptSettings({
+          websiteUrl: el("websiteUrl").value,
+          docUrl: el("docUrl").value,
+          sourceText: el("sourceText").value,
+          apply: !!apply
+        });
+      }
+      window.extractOnly = function() { runExtract(false); };
+      window.extractApply = function() { runExtract(true); };
+    </script>
+  `).setTitle("Brand Manifest Apply");
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function applyBrandManifestFromJson(rawJson) {
+  const text = String(rawJson || "").trim();
+  if (!text) throw new Error("Paste manifest JSON first.");
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch (e) {
+    throw new Error("Manifest must be valid JSON.");
+  }
+  applyBrandManifestObject_(obj);
+  return "Manifest applied to settings.";
+}
+
+function extractPromptSettings(payload) {
+  const source = payload || {};
+  const websiteUrl = String(source.websiteUrl || "").trim();
+  const docUrl = String(source.docUrl || "").trim();
+  const sourceText = String(source.sourceText || "").trim();
+  const apply = !!source.apply;
+  if (!websiteUrl && !docUrl && !sourceText) {
+    throw new Error("Provide website URL, Google Doc URL, and/or source text.");
+  }
+  const websiteText = fetchWebsiteTextSafe_(websiteUrl);
+  const docRead = getGoogleDocTextFromUrlSafe_(docUrl);
+  const docText = docRead.text;
+  const prompt = buildExtractionPrompt_(websiteUrl, websiteText, docUrl, docText, sourceText);
+  const extracted = callOpenAIJson_(prompt, {
+    model: getSetting_("OPENAI_MODEL", DEFAULTS.OPENAI_MODEL),
+    temperature: 0.2
+  });
+  if (apply) applyBrandManifestObject_(extracted);
+  const baseMessage = apply ? "Extracted and applied to settings." : "Extracted successfully.";
+  const message = docRead.warning ? (baseMessage + " Note: " + docRead.warning) : baseMessage;
+  return {
+    message: message,
+    extracted: extracted,
+    manifestJson: JSON.stringify(extracted, null, 2)
+  };
+}
+
+function buildExtractionPrompt_(websiteUrl, websiteText, docUrl, docText, sourceText) {
+  const schema = [
+    "{",
+    '  "brandName": "string",',
+    '  "brandWebsite": "string",',
+    '  "positioning1": "string",',
+    '  "positioning2": "string",',
+    '  "customerPromise": "string",',
+    '  "cta": "string",',
+    '  "ctaMode": "balanced|branded|experience",',
+    '  "ctaBrandedList": "line1\\\\nline2",',
+    '  "ctaExperienceList": "line1\\\\nline2",',
+    '  "angleMinHeadlines": "awards:1",',
+    '  "angleMinDescriptions": "awards:1",',
+    '  "bannedWords": ["word1","word2"],',
+    '  "offShelfPhrases": ["phrase1","phrase2"],',
+    '  "customPromptAppend": "string",',
+    '  "eventFeedbackAppend": "string",',
+    '  "adTypeTabs": "Search,pmax",',
+    '  "adTypeSheetMap": "search:Search,pmax:pmax",',
+    '  "adSheetName": "Search",',
+    '  "keywordSheetName": "List Of Keywords",',
+    '  "audienceSheetName": "List Of Audiences",',
+    '  "landingPageSheetName": "Landing Pages",',
+    '  "useKeywords": false,',
+    '  "useAudiences": false,',
+    '  "useLandingPageContext": false',
+    "}"
+  ].join("\n");
+  return [
+    "Extract brand settings JSON for a Google Ads script.",
+    "Return ONLY valid JSON in this schema:",
+    schema,
+    "",
+    "Rules:",
+    "- If unknown, return empty strings for text fields and false for booleans.",
+    '- ctaMode must be one of: balanced, branded, experience.',
+    "- bannedWords and offShelfPhrases must be arrays.",
+    "",
+    "Website URL:",
+    websiteUrl || "",
+    "",
+    "Website text excerpt:",
+    websiteText || "",
+    "",
+    "Google Doc URL:",
+    docUrl || "",
+    "",
+    "Google Doc text excerpt:",
+    (docText || "").slice(0, 24000),
+    "",
+    "Source text:",
+    sourceText.slice(0, 24000)
+  ].join("\n");
+}
+
+function getGoogleDocTextFromUrlSafe_(docUrl) {
+  const text = String(docUrl || "").trim();
+  if (!text) return { text: "", warning: "" };
+  const match = text.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!match || !match[1]) {
+    return {
+      text: "",
+      warning: "Google Doc URL format was invalid, so extraction ran without Doc content."
+    };
+  }
+  try {
+    const doc = DocumentApp.openById(match[1]);
+    return { text: String(doc.getBody().getText() || "").slice(0, 24000), warning: "" };
+  } catch (_e) {
+    return {
+      text: "",
+      warning: "Google Doc was inaccessible, so extraction ran without Doc content."
+    };
+  }
+}
+
+function fetchWebsiteTextSafe_(url) {
+  const target = String(url || "").trim();
+  if (!target) return "";
+  try {
+    const res = UrlFetchApp.fetch(target, { muteHttpExceptions: true, followRedirects: true });
+    const html = String(res.getContentText() || "");
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 16000);
+  } catch (_e) {
+    return "";
+  }
+}
+
+function menuQaLengthAudit() {
+  return runOptionalModuleFn_("qaLengthAuditRun", "QA_length_audit.gs");
+}
+
+function menuQaLengthFixAllTooLong() {
+  return runOptionalModuleFn_("qaLengthFixAllTooLong", "QA_length_audit.gs");
+}
+
+function menuQaStandaloneRunFix() {
+  return runOptionalModuleFn_("qaStandaloneFixAssets", "QA_standalone.gs");
+}
+
+function menuQaStandaloneBrandAudit() {
+  return runOptionalModuleFn_("qaStandaloneBrandComplianceAudit", "QA_standalone.gs");
+}
+
+function menuQaStandaloneBrandFix() {
+  return runOptionalModuleFn_("qaStandaloneBrandComplianceFix", "QA_standalone.gs");
+}
+/* ===============================
+UNIVERSAL GENERATION
+=============================== */
+
+function generateAdsOneRowTest() {
+  const prev = getSetting_("ROW_LIMIT", DEFAULTS.ROW_LIMIT);
+  setSetting_("ROW_LIMIT", "1");
+  try {
+    generateAds();
+  } finally {
+    setSetting_("ROW_LIMIT", prev);
+  }
+}
+
+function generateAds() {
+  injectMissingDynamicSettings_({ silent: true });
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const adTypes = getAdTypeConfigs_();
+  if (!adTypes.length) throw new Error("No ad types configured in AD_TYPE_TABS.");
+  const rowLimit = Math.max(1, Number(getSetting_("ROW_LIMIT", DEFAULTS.ROW_LIMIT)) || 5);
+  const delayMs = Math.max(0, Number(getSetting_("BATCH_DELAY_MS", DEFAULTS.BATCH_DELAY_MS)) || 0);
+  const useKeywords = getBoolSetting_("USE_KEYWORDS", false);
+  const useAudiences = getBoolSetting_("USE_AUDIENCES", false);
+  const useLandingPageContext = getBoolSetting_("USE_LANDING_PAGE_CONTEXT", false);
+  const overrideMode = getBoolSetting_("RUN_OVERRIDE_MODE", false);
+  const keywordSheet = useKeywords ? ss.getSheetByName(getSetting_("KEYWORD_SHEET_NAME", DEFAULTS.KEYWORD_SHEET_NAME)) : null;
+  const audienceSheet = useAudiences ? ss.getSheetByName(getSetting_("AUDIENCE_SHEET_NAME", DEFAULTS.AUDIENCE_SHEET_NAME)) : null;
+  const landingSheet = useLandingPageContext ? ss.getSheetByName(getSetting_("LANDING_PAGE_SHEET_NAME", DEFAULTS.LANDING_PAGE_SHEET_NAME)) : null;
+  const keywordData = keywordSheet ? keywordSheet.getDataRange().getValues() : [];
+  const audienceData = audienceSheet ? audienceSheet.getDataRange().getValues() : [];
+  const landingData = landingSheet ? landingSheet.getDataRange().getValues() : [];
+  const landingCache = { byAdGroup: {}, byUrl: {} };
+  let processed = 0;
+  let stopped = false;
+
+  for (let t = 0; t < adTypes.length; t++) {
+    if (isStopRequested_()) { stopped = true; break; }
+    if (processed >= rowLimit) break;
+    const typeCfg = adTypes[t];
+    const sheet = ss.getSheetByName(typeCfg.sheetName);
+    if (!sheet) continue;
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) continue;
+    const schema = detectAssetColumnsForSheet_(values[0] || []);
+    if (schema.adGroupCol < 0) continue;
+    const spec = getAssetSpecForAdType_(typeCfg.id, schema);
+
+    for (let r = 1; r < values.length; r++) {
+      if (isStopRequested_()) { stopped = true; break; }
+      if (processed >= rowLimit) break;
+      const row = values[r];
+      const adGroup = toText_(row[schema.adGroupCol]);
+      if (!adGroup) continue;
+      const emptySlots = getEmptyAssetSlots_(row, spec);
+      if (!overrideMode && !emptySlots.hasAny) continue;
+
+      const keywords = useKeywords ? getSignalListForAdGroup_(adGroup, keywordData, ["keyword", "keywords"]) : [];
+      const audiences = useAudiences ? getSignalListForAdGroup_(adGroup, audienceData, ["audience", "audiences", "signal", "signals"]) : [];
+      const landingContext = useLandingPageContext ? getLandingPageContextForAdGroup_(adGroup, landingData, landingCache) : "";
+      const prompt = buildPromptForAdType_(typeCfg.id, adGroup, keywords, audiences, landingContext, spec);
+      const generated = callOpenAIJson_(prompt, {
+        model: getSetting_("OPENAI_MODEL", DEFAULTS.OPENAI_MODEL),
+        temperature: Number(getSetting_("OPENAI_TEMPERATURE", DEFAULTS.OPENAI_TEMPERATURE)) || 0.4
+      });
+
+      writeAssetsToSheetBySchema_(sheet, r + 1, row, spec, generated, overrideMode);
+      processed++;
+      if (delayMs > 0) Utilities.sleep(delayMs);
+    }
+    if (stopped) break;
+  }
+  SpreadsheetApp.getUi().alert(
+    "Generation complete. Rows updated: " + processed +
+    (stopped ? "\nStopped early by user request." : "")
+  );
+}
+
+function getAdTypeConfigs_() {
+  const tabsRaw = getSetting_("AD_TYPE_TABS", DEFAULTS.AD_TYPE_TABS);
+  const mapRaw = getSetting_("AD_TYPE_SHEET_MAP", DEFAULTS.AD_TYPE_SHEET_MAP);
+  const tabs = parseCsvList_(tabsRaw).map(normalizeAdTypeId_);
+  const map = parseKeyValueMap_(mapRaw);
+  const out = [];
+  for (let i = 0; i < tabs.length; i++) {
+    const id = tabs[i];
+    if (!id) continue;
+    out.push({
+      id: id,
+      sheetName: map[id] || map[String(id).toLowerCase()] || (id === "search" ? getSetting_("AD_SHEET_NAME", DEFAULTS.AD_SHEET_NAME) : id)
+    });
+  }
+  return out;
+}
+
+function getAssetSpecForAdType_(adTypeId, schema) {
+  const isPmax = String(adTypeId || "").toLowerCase() === "pmax";
+  const headlineMax = 30;
+  const descriptionMax = 90;
+  const longHeadlineMax = 90;
+  const headlineCols = (schema.headlineCols || []).slice(0, isPmax ? 15 : 15);
+  const descriptionCols = (schema.descriptionCols || []).slice(0, isPmax ? 5 : 4);
+  const longHeadlineCols = isPmax ? (schema.longHeadlineCols || []).slice(0, 5) : [];
+  return {
+    adTypeId: adTypeId,
+    headlineCols: headlineCols,
+    descriptionCols: descriptionCols,
+    longHeadlineCols: longHeadlineCols,
+    headlineMax: headlineMax,
+    descriptionMax: descriptionMax,
+    longHeadlineMax: longHeadlineMax
+  };
+}
+
+function detectAssetColumnsForSheet_(headerRow) {
+  const headers = (headerRow || []).map(function(v) { return toText_(v); });
+  const normalize = function(v) { return toText_(v).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); };
+  const out = { adGroupCol: -1, headlineCols: [], descriptionCols: [], longHeadlineCols: [] };
+  const adGroupAliases = { "ad group": true, "asset group": true, "adgroup": true, "assetgroup": true };
+  for (let i = 0; i < headers.length; i++) {
+    const norm = normalize(headers[i]);
+    if (out.adGroupCol < 0 && adGroupAliases[norm]) out.adGroupCol = i;
+    let m = norm.match(/^headline\s+(\d+)$/);
+    if (m) {
+      out.headlineCols.push({ col: i, slot: Number(m[1]) || out.headlineCols.length + 1 });
+      continue;
+    }
+    m = norm.match(/^description\s+(\d+)$/);
+    if (m) {
+      out.descriptionCols.push({ col: i, slot: Number(m[1]) || out.descriptionCols.length + 1 });
+      continue;
+    }
+    m = norm.match(/^long headline\s+(\d+)$/);
+    if (m) {
+      out.longHeadlineCols.push({ col: i, slot: Number(m[1]) || out.longHeadlineCols.length + 1 });
+    }
+  }
+  out.headlineCols.sort(function(a, b) { return a.slot - b.slot; });
+  out.descriptionCols.sort(function(a, b) { return a.slot - b.slot; });
+  out.longHeadlineCols.sort(function(a, b) { return a.slot - b.slot; });
+  return out;
+}
+
+function getEmptyAssetSlots_(row, spec) {
+  const findEmpty = function(cols) {
+    const out = [];
+    for (let i = 0; i < cols.length; i++) {
+      const meta = cols[i];
+      const text = toText_(row[meta.col]);
+      if (!text) out.push(meta);
+    }
+    return out;
+  };
+  const emptyHeadlines = findEmpty(spec.headlineCols || []);
+  const emptyDescriptions = findEmpty(spec.descriptionCols || []);
+  const emptyLongHeadlines = findEmpty(spec.longHeadlineCols || []);
+  return {
+    emptyHeadlines: emptyHeadlines,
+    emptyDescriptions: emptyDescriptions,
+    emptyLongHeadlines: emptyLongHeadlines,
+    hasAny: !!(emptyHeadlines.length || emptyDescriptions.length || emptyLongHeadlines.length)
+  };
+}
+
+function writeAssetsToSheetBySchema_(sheet, rowNumber, currentRow, spec, generated, overrideMode) {
+  const headlines = Array.isArray(generated && generated.headlines) ? generated.headlines : [];
+  const descriptions = Array.isArray(generated && generated.descriptions) ? generated.descriptions : [];
+  const longHeadlines = Array.isArray(generated && generated.longHeadlines) ? generated.longHeadlines : [];
+
+  for (let i = 0; i < spec.headlineCols.length; i++) {
+    const meta = spec.headlineCols[i];
+    const existing = toText_(currentRow[meta.col]);
+    if (existing && !overrideMode) continue;
+    const next = enforceMaxLen_(toText_(headlines[i]), spec.headlineMax);
+    if (next) sheet.getRange(rowNumber, meta.col + 1).setValue(next);
+  }
+  for (let i = 0; i < spec.descriptionCols.length; i++) {
+    const meta = spec.descriptionCols[i];
+    const existing = toText_(currentRow[meta.col]);
+    if (existing && !overrideMode) continue;
+    const next = enforceMaxLen_(toText_(descriptions[i]), spec.descriptionMax);
+    if (next) sheet.getRange(rowNumber, meta.col + 1).setValue(next);
+  }
+  for (let i = 0; i < spec.longHeadlineCols.length; i++) {
+    const meta = spec.longHeadlineCols[i];
+    const existing = toText_(currentRow[meta.col]);
+    if (existing && !overrideMode) continue;
+    const next = enforceMaxLen_(toText_(longHeadlines[i]), spec.longHeadlineMax);
+    if (next) sheet.getRange(rowNumber, meta.col + 1).setValue(next);
+  }
+}
+
+function buildPromptForAdType_(adTypeId, adGroup, keywords, audiences, landingContext, spec) {
+  const brandName = getSetting_("BRAND_NAME", DEFAULTS.BRAND_NAME);
+  const brandWebsite = getSetting_("BRAND_WEBSITE", DEFAULTS.BRAND_WEBSITE);
+  const positioning1 = getSetting_("POSITIONING_LINE_1", DEFAULTS.POSITIONING_LINE_1);
+  const positioning2 = getSetting_("POSITIONING_LINE_2", DEFAULTS.POSITIONING_LINE_2);
+  const customerPromise = getSetting_("CUSTOMER_PROMISE", DEFAULTS.CUSTOMER_PROMISE);
+  const cta = getSetting_("CTA", DEFAULTS.CTA);
+  const bannedWords = getEffectiveBlockedTerms_();
+  const offShelf = parseCsvList_(getSetting_("OFF_SHELF_WORDS", DEFAULTS.OFF_SHELF_WORDS));
+  const customAppend = getSetting_("CUSTOM_PROMPT_APPEND", DEFAULTS.CUSTOM_PROMPT_APPEND);
+  const eventFeedback = getSetting_("EVENT_FEEDBACK_APPEND", DEFAULTS.EVENT_FEEDBACK_APPEND);
+  const isPmax = String(adTypeId || "").toLowerCase() === "pmax";
+  const longHeadlineRule = isPmax ? ("- Return " + spec.longHeadlineCols.length + " long headlines, each <= " + spec.longHeadlineMax + " chars") : "- Return no long headlines";
+
+  return [
+    "Write Google Ads assets as strict JSON.",
+    "Brand: " + brandName,
+    "Website: " + brandWebsite,
+    "Positioning: " + positioning1 + " | " + positioning2,
+    "Customer Promise: " + customerPromise,
+    "Primary CTA: " + cta,
+    "Ad Type: " + adTypeId,
+    "Ad Group label (internal only, do not copy words from it): " + adGroup,
+    "Keywords: " + (keywords.length ? keywords.join(", ") : "(none provided)"),
+    "Audience signals: " + (audiences.length ? audiences.join(", ") : "(none provided)"),
+    "Landing page context: " + (landingContext || "(none provided)"),
+    "Rules:",
+    "- Clear, human, high-intent copy",
+    "- Avoid generic package/deal language",
+    "- Do NOT use internal ad-group labels in ad text",
+    "- Do not use banned words: " + bannedWords.join(", "),
+    "- Do not use off-shelf phrases: " + offShelf.join(", "),
+    "- Headlines must be <= " + spec.headlineMax + " chars",
+    "- Descriptions must be <= " + spec.descriptionMax + " chars",
+    longHeadlineRule,
+    eventFeedback ? ("Event feedback rules: " + eventFeedback) : "",
+    customAppend ? ("Custom prompt append: " + customAppend) : "",
+    "Return ONLY valid JSON with fields:",
+    '{ "headlines": ["..."], "descriptions": ["..."], "longHeadlines": ["..."] }',
+    "Counts:",
+    "- headlines: " + spec.headlineCols.length,
+    "- descriptions: " + spec.descriptionCols.length,
+    "- longHeadlines: " + spec.longHeadlineCols.length
+  ].filter(Boolean).join("\n");
+}
+
+function getSignalListForAdGroup_(adGroup, sheetValues, signalAliases) {
+  if (!sheetValues || !sheetValues.length) return [];
+  const headers = (sheetValues[0] || []).map(function(v) { return toText_(v); });
+  const normalizedHeaders = headers.map(function(v) { return String(v || "").toLowerCase().trim(); });
+  const adGroupKey = String(adGroup || "").toLowerCase().trim();
+  let adGroupCol = normalizedHeaders.indexOf("ad group");
+  if (adGroupCol < 0) adGroupCol = normalizedHeaders.indexOf("asset group");
+  let signalCol = -1;
+  for (let i = 0; i < signalAliases.length; i++) {
+    const idx = normalizedHeaders.indexOf(String(signalAliases[i]).toLowerCase());
+    if (idx >= 0) { signalCol = idx; break; }
+  }
+
+  const out = [];
+  const seen = {};
+  if (adGroupCol >= 0 && signalCol >= 0) {
+    for (let r = 1; r < sheetValues.length; r++) {
+      const rowAdGroup = toText_(sheetValues[r][adGroupCol]).toLowerCase();
+      if (rowAdGroup !== adGroupKey) continue;
+      const val = toText_(sheetValues[r][signalCol]);
+      if (!val) continue;
+      const k = val.toLowerCase();
+      if (!seen[k]) { seen[k] = true; out.push(val); }
+    }
+    return out;
+  }
+
+  const colByHeader = normalizedHeaders.indexOf(adGroupKey);
+  if (colByHeader >= 0) {
+    for (let r = 1; r < sheetValues.length; r++) {
+      const val = toText_(sheetValues[r][colByHeader]);
+      if (!val) continue;
+      const k = val.toLowerCase();
+      if (!seen[k]) { seen[k] = true; out.push(val); }
+    }
+  }
+  return out;
+}
+
+function getLandingPageContextForAdGroup_(adGroup, sheetValues, cache) {
+  if (!sheetValues || !sheetValues.length) return "";
+  const key = normalizeAdTypeId_(adGroup);
+  const memo = cache || { byAdGroup: {}, byUrl: {} };
+  if (memo.byAdGroup[key] != null) return memo.byAdGroup[key];
+  const url = getLandingPageUrlForAdGroup_(adGroup, sheetValues);
+  if (!url) {
+    memo.byAdGroup[key] = "";
+    return "";
+  }
+  if (memo.byUrl[url] == null) {
+    memo.byUrl[url] = fetchWebsiteTextSafe_(url).slice(0, 1200);
+  }
+  memo.byAdGroup[key] = memo.byUrl[url] || "";
+  return memo.byAdGroup[key];
+}
+
+function getLandingPageUrlForAdGroup_(adGroup, sheetValues) {
+  if (!sheetValues || !sheetValues.length) return "";
+  const headers = (sheetValues[0] || []).map(function(v) { return toText_(v).toLowerCase().trim(); });
+  const adGroupKey = toText_(adGroup).toLowerCase().trim();
+  let adGroupCol = headers.indexOf("ad group");
+  if (adGroupCol < 0) adGroupCol = headers.indexOf("asset group");
+  let urlCol = headers.indexOf("landing page");
+  if (urlCol < 0) urlCol = headers.indexOf("landing page url");
+  if (urlCol < 0) urlCol = headers.indexOf("url");
+  if (adGroupCol >= 0 && urlCol >= 0) {
+    for (let r = 1; r < sheetValues.length; r++) {
+      const rowAdGroup = toText_(sheetValues[r][adGroupCol]).toLowerCase();
+      if (rowAdGroup !== adGroupKey) continue;
+      const url = toText_(sheetValues[r][urlCol]);
+      if (url) return url;
+    }
+  }
+  const colByHeader = headers.indexOf(adGroupKey);
+  if (colByHeader >= 0) {
+    for (let r = 1; r < sheetValues.length; r++) {
+      const val = toText_(sheetValues[r][colByHeader]);
+      if (val) return val;
+    }
+  }
+  return "";
+}
+
+function callOpenAIJson_(prompt, options) {
+  const apiKey = getApiKey_();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is missing in script properties.");
+  const model = String(options && options.model ? options.model : DEFAULTS.OPENAI_MODEL);
+  const temperature = Number(options && options.temperature != null ? options.temperature : DEFAULTS.OPENAI_TEMPERATURE);
+  const response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + apiKey },
+    payload: JSON.stringify({
+      model: model,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }],
+      temperature: temperature
+    }),
+    muteHttpExceptions: true
+  });
+  const raw = response.getContentText();
+  const parsed = JSON.parse(raw);
+  const content = parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].message
+    ? String(parsed.choices[0].message.content || "")
+    : "";
+  const cleaned = content.replace(/```json/gi, "").replace(/```/g, "").trim();
+  return JSON.parse(cleaned);
+}
+
+function getApiKey_() {
+  return getSetting_("OPENAI_API_KEY", "");
+}
+
+function normalizeAdTypeId_(value) {
+  return String(value == null ? "" : value).toLowerCase().trim();
+}
+
+function parseCsvList_(value) {
+  return String(value == null ? "" : value)
+    .split(/[\n,]/)
+    .map(function(v) { return String(v || "").trim(); })
+    .filter(Boolean);
+}
+
+function getEffectiveBlockedTerms_() {
+  const fromSettings = parseCsvList_(getSetting_("BANNED_WORDS", DEFAULTS.BANNED_WORDS))
+    .map(function(v) { return String(v || "").toLowerCase().trim(); })
+    .filter(Boolean);
+  const merged = fromSettings.concat(HARD_BLOCKED_TERMS);
+  const seen = {};
+  const out = [];
+  for (let i = 0; i < merged.length; i++) {
+    const t = merged[i];
+    if (!t || seen[t]) continue;
+    seen[t] = true;
+    out.push(t);
+  }
+  return out;
+}
+
+function parseKeyValueMap_(value) {
+  const out = {};
+  const parts = parseCsvList_(value);
+  for (let i = 0; i < parts.length; i++) {
+    const token = parts[i];
+    const idx = token.indexOf(":");
+    if (idx <= 0) continue;
+    const key = normalizeAdTypeId_(token.slice(0, idx));
+    const val = toText_(token.slice(idx + 1));
+    if (key && val) out[key] = val;
+  }
+  return out;
+}
+
+function enforceMaxLen_(text, maxLen) {
+  const t = normalizeAssetText_(toText_(text));
+  if (!t) return "";
+  if (t.length <= maxLen) return t;
+  const sliced = t.slice(0, maxLen + 1);
+  const lastSpace = sliced.lastIndexOf(" ");
+  if (lastSpace > Math.floor(maxLen * 0.6)) return sliced.slice(0, lastSpace).trim();
+  return t.slice(0, maxLen).trim();
+}
+
+function normalizeAssetText_(text) {
+  return toText_(text)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])\/([A-Za-z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function toText_(value) {
+  return value == null ? "" : String(value).trim();
+}

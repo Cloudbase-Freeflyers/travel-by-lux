@@ -1,0 +1,22 @@
+/* Animations — Travel by Luxe */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Staggered entrance delays for hero children */
+.hero__content .hero__subtitle { animation-delay: 0s; }
+.hero__content .hero__title { animation-delay: 0.15s; }
+.hero__content .hero__tagline { animation-delay: 0.3s; }
